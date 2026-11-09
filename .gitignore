@@ -1,0 +1,21 @@
+# Ambiente
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Material da disciplina e planejamento interno da equipe. Não vão para o repositório público
+Módulo*/
+*.mp4
+*.wav
+Seminarios_de_Sistemas_e_Redes_Multimidia_2026_Atualizado.pdf
+Tema09_IA_Sistemas_Multimidia_Planejamento.md
+Tema09_MVP_Guia_de_Implementacao.md
+
+# Dados: vídeos originais e derivados ficam fora do git (regenerável)
+data/raw/
+data/derived/
+
+# Demo com cópias de vídeo, legenda e JSON
+web/*.mp4

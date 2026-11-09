@@ -1,0 +1,27 @@
+# Uso: ver README.md, seção "Rodar em contêiner".
+services:
+  pipeline:
+    build: .
+    image: falai:latest
+    # Usuário do host, para os arquivos gerados em data/ e results/ não ficarem como root.
+    # Passe HOST_UID=$(id -u) HOST_GID=$(id -g) ao rodar.
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    environment:
+      HOME: /tmp
+    volumes:
+      # Código montado para iterar sem reconstruir a imagem
+      - ./src:/app/src:ro
+      - ./tests:/app/tests:ro
+      # Dados e resultados ficam no host
+      - ./data:/app/data
+      - ./results:/app/results
+      # Vídeos da disciplina só entram na etapa 1, depois de confirmada a licença:
+      # - "${VIDEO_DIR}:/app/data/raw:ro"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    command: ["pytest", "-q"]

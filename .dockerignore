@@ -1,0 +1,19 @@
+# Vídeos da disciplina: nunca entram no contexto nem na imagem (licença pendente, CLAUDE.md regra 4)
+Módulo*
+*.mp4
+*.mkv
+*.mov
+
+# Dados derivados e resultados são montados por volume, não copiados
+data/raw
+data/derived
+results
+
+# Ambiente local e caches
+.venv
+__pycache__
+**/__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+.git

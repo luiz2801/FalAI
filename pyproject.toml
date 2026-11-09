@@ -1,0 +1,27 @@
+[project]
+name = "falai"
+version = "0.1.0"
+description = "FalAI: análise de vídeos de aula com IA (STT, OCR e avaliação), projeto de Redes Multimídia, UFPA"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "faster-whisper==1.2.1",
+    "opencv-python-headless==5.0.0.93",
+    "numpy==2.5.4",
+    "jiwer==4.0.0",
+    "pytesseract==0.3.13",
+    "pillow==13.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==9.1.1",
+    "ruff==0.17.2",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
