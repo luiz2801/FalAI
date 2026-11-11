@@ -17,5 +17,5 @@ Tema09_MVP_Guia_de_Implementacao.md
 data/raw/
 data/derived/
 
-# Demo com cópias de vídeo, legenda e JSON
-web/*.mp4
+# Demo: cópias de vídeo, legenda e JSON geradas por src/pipeline.py
+web/data/

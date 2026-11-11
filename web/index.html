@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FalAI — vídeo de aula</title>
+<!-- F5: página estática. Servir com `cd web && python -m http.server` (fetch não funciona em file://).
+     Lê data/videos.json e data/<video>/manifest.json, gerados por src/pipeline.py. -->
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fcfcfb; --panel: #f3f2ef; --ink: #0b0b0b; --ink-2: #52514e; --line: #e4e3df;
+    --accent: #2a78d6; --hit: #fff1c2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1a1a19; --panel: #242422; --ink: #f0efec; --ink-2: #c3c2b7; --line: #3a3936;
+            --accent: #3987e5; --hit: #4a3f12; }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }  /* senão o display: grid dos slides vence o hidden */
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; padding: .9rem 1rem;
+           border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 1.05rem; margin: 0 auto 0 0; }
+  select, input { font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line);
+                  border-radius: 6px; padding: .35rem .5rem; }
+  main { display: grid; grid-template-columns: minmax(0, 3fr) minmax(280px, 2fr); gap: 1rem; padding: 1rem;
+         max-width: 1400px; margin: 0 auto; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+  video { width: 100%; border-radius: 8px; background: #000; aspect-ratio: 16 / 9; }
+  #now { color: var(--ink-2); font-size: .85rem; margin-top: .4rem; min-height: 1.2em; }
+  aside { display: flex; flex-direction: column; min-height: 0; max-height: calc(100vh - 6rem);
+          border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .tabs { display: flex; border-bottom: 1px solid var(--line); background: var(--panel); }
+  .tabs button { flex: 1; font: inherit; color: var(--ink-2); background: none; border: 0; padding: .6rem .3rem;
+                 cursor: pointer; border-bottom: 2px solid transparent; }
+  .tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+  .pane { overflow-y: auto; padding: .5rem; flex: 1; }
+  .item { display: flex; gap: .6rem; align-items: flex-start; width: 100%; text-align: left; font: inherit;
+          color: inherit; background: none; border: 0; border-radius: 6px; padding: .4rem .5rem; cursor: pointer; }
+  .item:hover { background: var(--panel); }
+  .item.current { background: var(--panel); box-shadow: inset 3px 0 0 var(--accent); }
+  .t { font-variant-numeric: tabular-nums; color: var(--accent); font-size: .85rem; white-space: nowrap;
+       padding-top: .1rem; }
+  .slides { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: .5rem; }
+  .slides .item { flex-direction: column; gap: .2rem; padding: .3rem; }
+  .slides img { width: 100%; border-radius: 4px; border: 1px solid var(--line); }
+  mark { background: var(--hit); color: inherit; border-radius: 2px; }
+  .empty { color: var(--ink-2); padding: 1rem; }
+  #summary h1, #summary h2, #summary h3 { font-size: 1rem; margin: 1rem 0 .3rem; }
+  #summary ul, #summary ol { padding-left: 1.2rem; margin: .2rem 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>FalAI — análise de vídeo de aula</h1>
+  <label>Vídeo <select id="sel"></select></label>
+  <input id="q" type="search" placeholder="Buscar na fala e nos slides…" aria-label="Buscar">
+</header>
+<main>
+  <section>
+    <video id="player" controls preload="metadata" crossorigin="anonymous"></video>
+    <div id="now"></div>
+  </section>
+  <aside>
+    <div class="tabs" role="tablist">
+      <button role="tab" data-pane="topics" aria-selected="true">Tópicos</button>
+      <button role="tab" data-pane="slides">Slides</button>
+      <button role="tab" data-pane="transcript">Transcrição</button>
+      <button role="tab" data-pane="summary">Resumo</button>
+    </div>
+    <div class="pane" id="topics"></div>
+    <div class="pane slides" id="slides" hidden></div>
+    <div class="pane" id="transcript" hidden></div>
+    <div class="pane" id="summary" hidden></div>
+  </aside>
+</main>
+<script>
+const $ = (s) => document.querySelector(s);
+const player = $("#player");
+let data = { base: "", slides: [], transcript: [], chapters: [] };
+
+const fmt = (t) => {
+  t = Math.floor(t);
+  const h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), s = t % 60;
+  return (h ? h + ":" : "") + String(m).padStart(h ? 2 : 1, "0") + ":" + String(s).padStart(2, "0");
+};
+const fold = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function highlight(text, q) {
+  if (!q) return esc(text);
+  const i = fold(text).indexOf(fold(q));
+  if (i < 0) return esc(text);
+  return esc(text.slice(0, i)) + "<mark>" + esc(text.slice(i, i + q.length)) + "</mark>" + esc(text.slice(i + q.length));
+}
+const seek = (t) => { player.currentTime = t; player.play(); };
+
+async function getJSON(url) { const r = await fetch(url); if (!r.ok) throw new Error(url); return r.json(); }
+async function getText(url) { const r = await fetch(url); return r.ok ? r.text() : ""; }
+
+function parseVTT(txt) {
+  const toS = (ts) => ts.split(":").reduce((a, p) => a * 60 + parseFloat(p), 0);
+  return txt.split(/\n\s*\n/).map((b) => b.trim().split("\n")).filter((l) => l.length >= 2 && l[0].includes("-->"))
+    .map((l) => ({ t: toS(l[0].split("-->")[0].trim()), text: l.slice(1).join(" ") }));
+}
+
+function mdToHTML(md) {  // só o necessário para o resumo: títulos, listas, negrito e parágrafos
+  const out = []; let list = null;
+  const inline = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  for (const line of md.split("\n")) {
+    const h = line.match(/^(#{1,3})\s+(.*)/), li = line.match(/^\s*(?:[-*]|\d+\.)\s+(.*)/);
+    if (!li && list) { out.push(`</${list}>`); list = null; }
+    if (h) out.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`);
+    else if (li) {
+      const tipo = /^\s*\d+\./.test(line) ? "ol" : "ul";
+      if (list !== tipo) { if (list) out.push(`</${list}>`); out.push(`<${tipo}>`); list = tipo; }
+      out.push(`<li>${inline(li[1])}</li>`);
+    } else if (line.trim()) out.push(`<p>${inline(line)}</p>`);
+  }
+  if (list) out.push(`</${list}>`);
+  return out.join("");
+}
+
+function render() {
+  const q = $("#q").value.trim();
+  const hit = (s) => !q || fold(s).includes(fold(q));
+  const row = (t, html) => `<button class="item" data-t="${t}"><span class="t">${fmt(t)}</span><span>${html}</span></button>`;
+
+  $("#topics").innerHTML = data.chapters.length
+    ? data.chapters.filter((c) => hit(c.text)).map((c) => row(c.t, highlight(c.text, q))).join("")
+    : `<p class="empty">Sem tópicos: gere o resumo (pipeline.py --summary ollama).</p>`;
+  const slides = data.slides.filter((s) => hit(s.texto || ""));
+  $("#slides").innerHTML = slides.length
+    ? slides.map((s) => `<button class="item" data-t="${s.t}"><img loading="lazy" src="${data.base + s.file}" alt="Slide em ${fmt(s.t)}"><span class="t">${fmt(s.t)}</span>${s.texto && q ? `<span>${highlight(s.texto.slice(0, 120), q)}</span>` : ""}</button>`).join("")
+    : `<p class="empty">${q ? "Nenhum slide com esse texto (o OCR preenche o texto na etapa 3)." : "Sem keyframes."}</p>`;
+  const segs = data.transcript.filter((s) => hit(s.text));
+  $("#transcript").innerHTML = segs.length ? segs.map((s) => row(s.t, highlight(s.text, q))).join("")
+    : `<p class="empty">Nada encontrado.</p>`;
+  if (q) for (const [pane, n] of [["transcript", segs.length], ["topics", data.chapters.length], ["slides", slides.length]])
+    if (n) { showPane(pane); break; }
+}
+
+function showPane(id) {
+  document.querySelectorAll(".tabs button").forEach((b) => b.setAttribute("aria-selected", b.dataset.pane === id));
+  document.querySelectorAll(".pane").forEach((p) => (p.hidden = p.id !== id));
+}
+
+async function load(id) {
+  const base = `data/${id}/`;
+  const m = await getJSON(base + "manifest.json");
+  data = { base, slides: await getJSON(base + m.slides), transcript: await getJSON(base + m.transcript),
+           chapters: m.chapters ? parseVTT(await getText(base + m.chapters)) : [] };
+  player.innerHTML = `<track kind="subtitles" srclang="pt" label="Português" src="${base + m.subs}" default>`;
+  player.src = base + m.video;
+  $("#summary").innerHTML = m.summary ? mdToHTML(await getText(base + m.summary))
+    : `<p class="empty">Resumo não gerado (F9 é opcional e precisa de um LLM).</p>`;
+  render();
+}
+
+player.addEventListener("timeupdate", () => {
+  const t = player.currentTime;
+  const cur = data.transcript.findLast?.((s) => s.t <= t) ?? [...data.transcript].reverse().find((s) => s.t <= t);
+  const cap = data.chapters.findLast?.((c) => c.t <= t);
+  $("#now").textContent = cap ? `Tópico: ${cap.text}` : "";
+  document.querySelectorAll("#transcript .item").forEach((el) => {
+    const on = cur && Number(el.dataset.t) === cur.t;
+    if (on && !el.classList.contains("current") && !$("#transcript").hidden) el.scrollIntoView({ block: "nearest" });
+    el.classList.toggle("current", on);
+  });
+});
+document.addEventListener("click", (e) => {
+  const tab = e.target.closest(".tabs button"); if (tab) return showPane(tab.dataset.pane);
+  const it = e.target.closest("[data-t]"); if (it) seek(Number(it.dataset.t));
+});
+$("#q").addEventListener("input", render);
+$("#sel").addEventListener("change", (e) => load(e.target.value));
+
+(async () => {
+  try {
+    const ids = await getJSON("data/videos.json");
+    $("#sel").innerHTML = ids.map((i) => `<option>${esc(i)}</option>`).join("");
+    if (ids.length) await load(ids[0]);
+  } catch {
+    document.querySelector("main").innerHTML = `<p class="empty">Nenhum vídeo processado. Rode
+      <code>python src/pipeline.py data/raw/&lt;video&gt;.mp4</code> e sirva com
+      <code>cd web &amp;&amp; python -m http.server</code>.</p>`;
+  }
+})();
+</script>
+</body>
+</html>
