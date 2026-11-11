@@ -55,7 +55,10 @@
 
 > Qual é o trade-off entre qualidade (WER/CER) e tempo de processamento de modelos de STT e OCR em vídeos de aula com ruído?
 
-Pergunta secundária, só se a F8 entrar: quanto o processamento de IA afeta a entrega em streaming?
+Perguntas secundárias:
+
+- Só se a F9 entrar `[DECIDIDO]` (docs/decisoes.md, D1): o erro do STT piora o resumo gerado por LLM? Um modelo de STT menor produz resumos equivalentes aos de um maior?
+- Só se a F8 entrar: quanto o processamento de IA afeta a entrega em streaming?
 
 **Título provisório** `[PENDENTE]` aprovação do professor: *Análise inteligente de vídeos de aula: transcrição, OCR e indexação multimodal com avaliação de qualidade e custo computacional.*
 
@@ -104,12 +107,13 @@ Pesos: implementação 5,0; artigo técnico 3,0; defesa 2,0.
 | 8 | Execução | GPU RTX 3060 12 GB. Fallback `device="cpu"`, `compute_type="int8"`. A mesma escolha em todos os experimentos | `[PREMISSA]` guia, §1.3 |
 | 9 | Ruído | Ruído branco aditivo, SNR 20, 10 e 0 dB, seed 0. Ruído real de sala como extra, se houver tempo. A simplificação vai como limitação | `[PREMISSA]` |
 | 10 | Dataset | 6 vídeos de 5 a 15 min, e trechos de 2 a 3 min com gabarito. Vídeos de ~45 min só para tempo e demo | `[PREMISSA]` |
-| 11 | Modelos | Locais. Sem API paga. Se API for usada, o custo entra como métrica | `[VALIDAR]` professor, pergunta 3 |
+| 11 | Modelos | Locais por padrão. F9 com dois backends: Ollama (padrão) e Claude API (paga, só com `--confirm-paid`; o custo entra como métrica) | `[DECIDIDO]` (D2) + `[VALIDAR]` professor, pergunta 3 |
 | 12 | Vídeos | Gravação própria ou licença livre, com licença anotada por vídeo | `[DECIDIDO]` (N4) + `[VALIDAR]` pergunta 2 |
-| 13 | Sumarização (F9) | Só se sobrar tempo, com avaliação própria | `[PREMISSA]` |
+| 13 | Sumarização (F9) | Opcional. Implementada (`summarize.py`), com avaliação às cegas (`eval_summaries.py`): nota de 1 a 5, fidelidade, cobertura de tópicos e precisão dos timestamps | `[PREMISSA]` |
 | 14 | Hardware | RTX 3060 12 GB, 24 threads, 62 GB de RAM, FFmpeg instalado, Tesseract **não** instalado | `[DECIDIDO]` medido no guia, §1.1 |
 | 15 | Equipe | Divisão de papéis do planejamento, seção 9 (3 ou 4 integrantes). Nomes não definidos | `[PENDENTE]` |
-| 16 | Repositório | O diretório ainda não é um repositório git | `[PENDENTE]` decisão do usuário |
+| 16 | Repositório | <https://github.com/luiz2801/FalAI> (público) | `[DECIDIDO]` |
+| 17 | Filtro de alucinações do STT | Ligado por padrão; `--no-clean` para comparar (docs/decisoes.md) | `[PREMISSA]` muda o WER: revisar com a equipe |
 
 ---
 
@@ -131,6 +135,9 @@ Pesos: implementação 5,0; artigo técnico 3,0; defesa 2,0.
 | RQ2 | OCR | 2 motores × 4 condições (limpo, resize 0,5, blur 9, JPEG 30) | 48 | CER, precisão, recall, tempo |
 | RQ3 | Busca (F6) | 20 a 30 consultas com trechos relevantes marcados | — | Precision@5, Recall@5, MRR |
 | RQ4 | Entrega HLS (F8) | Com e sem o pipeline de IA em paralelo | — | Tempo de início, buffering, bitrate, tamanho dos metadados |
+| RQ5 | Resumo por LLM (F9) | Modelos de STT × LLM, 2 repetições (não determinismo) | — | Nota (1 a 5, às cegas), fidelidade, cobertura, precisão dos timestamps (±30 s), custo, tempo |
+
+Extra da RQ1 (I5): condição `limpo_vocab`, com o vocabulário da disciplina no `initial_prompt`; métrica `acerto_termos`.
 
 Ablação (F7): taxa de keyframes (`step_s`) e limiar de troca de slide (`thr`), com efeito no recall de slides e no tempo.
 
@@ -165,7 +172,7 @@ RQ4 é o experimento que responde diretamente à diferença entre análise e tra
 | Métricas | `jiwer`, implementação própria de precisão/recall | — |
 | Vídeo | FFmpeg (áudio, keyframes, HLS na F8) | — |
 | Backend e front | Página estática com HTML e JavaScript; `python -m http.server` | FastAPI, se a busca precisar de API |
-| Sumarização (F9) | LLM local (Ollama) | API, com custo como métrica |
+| Sumarização (F9) | LLM local (Ollama, padrão `qwen2.5:7b`) | Claude API (`claude-opus-5-5`), com custo como métrica |
 
 Gerenciador `uv`, Python 3.12. Ferramentas de qualidade: `ruff` e `pytest`. Setup e smoke tests estão em `guia.md`, seção 3, e no guia de implementação, §1.
 
@@ -181,27 +188,31 @@ Planejada, a partir do guia de implementação (§1.4) e com pastas adicionadas.
 tema9/
 ├── CLAUDE.md                  # este documento
 ├── guia.md                    # mapa do código e contratos
-├── README.md                  # ⏳ comandos para reproduzir tudo; tabela de licença dos vídeos
-├── pyproject.toml             # ⏳ versões fixadas
-├── .gitignore                 # ⏳ data/raw, data/derived, .venv
-├── src/                       # ⏳ código (ver guia.md, seção 4)
+├── README.md                  # comandos para reproduzir tudo; tabela de licença dos vídeos
+├── pyproject.toml, uv.lock    # versões fixadas
+├── .gitignore                 # data/raw, data/derived, web/data, .venv
+├── src/                       # código (ver guia.md, seção 4)
 │   ├── extract.py
 │   ├── stt.py
-│   ├── ocr.py
+│   ├── ocr.py                 # ⏳ etapa 3
 │   ├── degrade.py
 │   ├── metrics.py
+│   ├── summarize.py           # F9
+│   ├── eval_summaries.py      # F9
+│   ├── pipeline.py            # um vídeo de ponta a ponta + demo
 │   ├── run_experiments.py
 │   └── report.py
-├── tests/                     # ⏳ testes de fumaça e unitários
+├── tests/                     # testes de fumaça e unitários
 ├── data/
 │   ├── raw/                   # vídeos originais (fora do git)
-│   ├── gt/                    # gabaritos humanos: <video>.stt.txt, <video>.slides.json
+│   ├── gt/                    # gabaritos humanos: <video>.stt.txt, <video>.slides.json, <video>.topics.txt;
+│   │                          # clips.csv (trecho de cada vídeo) e terms.txt (vocabulário)
 │   └── derived/               # áudio, ruído, frames, .vtt, .json (regenerável, fora do git)
 ├── results/                   # raw.csv, tabelas e figuras geradas
-├── web/                       # ⏳ index.html; cópias de vídeo, .vtt e .json só para a demo
-├── artigo/                    # ⏳ [PENDENTE] modelo SBC e fontes do artigo
+├── web/                       # index.html; web/data/ (gerado, fora do git) com as cópias para a demo
+├── artigo/                    # esqueleto; [PENDENTE] modelo SBC
 └── docs/
-    └── decisoes.md            # ⏳ mudanças de plano, com motivo (criar na primeira mudança)
+    └── decisoes.md            # mudanças de plano, com motivo
 ```
 
 Os arquivos de planejamento ficam uma pasta acima, em `redes multimidia/`, e não foram movidos.
@@ -214,6 +225,9 @@ Os arquivos de planejamento ficam uma pasta acima, em `redes multimidia/`, e nã
 - **Gabarito de fala** (`data/gt/<video>.stt.txt`): 1 trecho de 2 a 3 min por vídeo, transcrito do zero à mão, seguindo as regras de normalização da seção 4. Custo estimado: 15 a 20 min por trecho.
 - **Gabarito de slides** (`data/gt/<video>.slides.json`): se houver o PDF/PPTX original da aula, extraia o texto de cada slide (`pdftotext`) e registre a origem. Senão, digite à mão 10 a 15 slides por vídeo.
 - **Consultas da busca** (F6): 20 a 30 consultas com os trechos relevantes marcados, em `data/gt/`. Criar na F6.
+- **Trechos** (`data/gt/clips.csv`): início e duração do trecho com gabarito de cada vídeo. Comece o trecho no início de uma frase: cortes no meio da frase fazem o Whisper apagar o começo (guia.md, armadilha 21).
+- **Tópicos reais** (`data/gt/<video>.topics.txt`, só para a F9): anotados à mão ao assistir.
+- **Vocabulário** (`data/gt/terms.txt`, opcional, I5): termos técnicos que aparecem nos trechos.
 - **Formatos de cada arquivo**: `guia.md`, seção 5.
 
 Divergência conhecida: o gabarito de slides e a saída do OCR usam chaves diferentes no guia de implementação (`text` e `texto`). Decida uma antes da etapa 3 (ver `guia.md`, seção 5).
