@@ -1,0 +1,85 @@
+% Esqueleto do artigo (SBC, 5 a 8 páginas), na estrutura do CLAUDE.md, seção 9.
+% [PENDENTE] modelo SBC "trabalhado em sala" (pendência 4). Até lá, use o modelo público da SBC:
+% coloque sbc-template.sty e sbc.bst nesta pasta.
+% Compilar: pdflatex artigo && bibtex artigo && pdflatex artigo && pdflatex artigo
+% Regra 2: nenhum número digitado à mão. Tabelas e figuras vêm de src/report.py.
+
+\documentclass[12pt]{article}
+\usepackage{sbc-template}
+\usepackage{graphicx,url}
+\usepackage[utf8]{inputenc}
+\usepackage[brazil]{babel}
+\graphicspath{{../results/figures/}}
+
+\sloppy
+
+\title{Análise inteligente de vídeos de aula: transcrição, OCR e indexação multimodal
+com avaliação de qualidade e custo computacional}
+
+\author{Autor 1\inst{1}, Autor 2\inst{1}, Autor 3\inst{1}}
+\address{Universidade Federal do Pará (UFPA) -- Belém, PA -- Brasil
+  \email{\{autor1,autor2,autor3\}@...}
+}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+% TODO (inglês)
+\end{abstract}
+
+\begin{resumo}
+% TODO: problema, proposta, método (WER/CER, RTF, ruído), resultado principal.
+\end{resumo}
+
+\section{Introdução}
+% Vídeos de aula sem legenda nem indexação. Contribuição. Fronteira análise × transporte
+% (plano de conteúdo × plano de entrega). Pergunta de investigação e secundária (F9).
+
+\section{Fundamentação teórica}
+% STT: áudio digital (amostragem a 16 kHz), Whisper (Transformer encoder-decoder) \cite{radford2022}, VAD.
+% OCR \cite{tesseract}. Embeddings multimodais \cite{radford2021clip}. HLS e QoE.
+% Métricas: WER, CER, RTF, precisão e recall de palavras. LLMs e sumarização \cite{lin2004}.
+
+\section{Trabalhos relacionados e tecnologias}
+% Whisper, CLIP, legendas automáticas de plataformas; faster-whisper \cite{fasterwhisper}, jiwer \cite{jiwer}.
+
+\section{Metodologia}
+% Pipeline, dataset (licenças), gabarito humano, protocolo de ruído (SNR 20/10/0 dB, seed 0),
+% protocolo de tempo (aquecimento, 3 repetições, carga à parte), avaliação às cegas da F9.
+
+\section{Arquitetura e implementação}
+% Diagrama em dois planos. Por que faster-whisper/CTranslate2 e int8; por que enviar o SRT ao LLM;
+% filtro de alucinações (docs/decisoes.md).
+
+\section{Experimentos e métricas}
+% Hardware (results/hardware.json). Matriz RQ1, RQ2 e RQ5.
+
+\section{Resultados e discussão}
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=.48\textwidth]{fig1_wer_snr.pdf}\hfill
+\includegraphics[width=.48\textwidth]{fig2_rtf_wer.pdf}
+\caption{Robustez ao ruído (WER × SNR) e trade-off qualidade × custo (RTF × WER).}
+\label{fig:stt}
+\end{figure}
+
+% Tabela 1: results/tables/tabela1_wer.md. Tabela 3: tabela3_tempo_stt.md.
+% Análise de erros (regra 11): nomes próprios, siglas, números, sotaque, ruído.
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=.7\textwidth]{fig4_wer_nota_resumo.pdf}
+\caption{F9: WER do modelo de STT × nota do resumo gerado por LLM.}
+\label{fig:f9}
+\end{figure}
+
+\section{Conclusão e trabalhos futuros}
+% Limitações: ruído branco sintético, amostra pequena, um orador, não determinismo do LLM.
+% Futuro: diarização, ruído real de sala, F6 a F8.
+
+\bibliographystyle{sbc}
+\bibliography{referencias}
+
+\end{document}
