@@ -1,0 +1,6 @@
+# Tópicos reais da aula, anotados à mão ao assistir (F9: cobertura e precisão dos timestamps).
+# Renomeie para <video>.topics.txt. Formato: [hh:mm:ss] Título
+[00:00:40] Introdução e objetivos da aula
+[00:06:15] Amostragem e teorema de Nyquist
+[00:18:30] Quantização
+[00:31:00] Codificação de Huffman

@@ -1,0 +1,23 @@
+# Vocabulário da disciplina para o initial_prompt do Whisper (I5) e para a métrica de acerto de
+# termos. Um termo por linha; '#' inicia comentário. Copie para data/gt/terms.txt e deixe só os
+# termos que aparecem nos trechos com gabarito, os mais importantes no topo (cabem ~600 caracteres).
+codec
+bitrate
+taxa de amostragem
+jitter
+latência
+RTP
+WebRTC
+MPEG-DASH
+HLS
+QoS
+QoE
+H.264
+quantização
+compressão
+codificação de Huffman
+DCT
+GOP
+largura de banda
+perda de pacotes
+Nyquist
