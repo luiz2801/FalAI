@@ -19,3 +19,6 @@ data/derived/
 
 # Demo: cópias de vídeo, legenda e JSON geradas por src/pipeline.py
 web/data/
+
+# Cópias embaralhadas para os avaliadores (a chave e as notas ficam versionadas)
+results/eval/blind/
