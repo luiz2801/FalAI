@@ -39,3 +39,48 @@ Escolhas sem efeito nos números:
   faster-whisper 1.2.1 é incompatível com o PyAV 19 (`TypeError: metadata_errors`).
 - Keyframes por diferença de quadros com OpenCV, como no guia. O outro plano usava a detecção de cena do
   FFmpeg; ficou de fora.
+
+## 2026-11-12 — Slides completos: `extract.slides()` ao lado do baseline `keyframes()`
+
+**Problema.** O `keyframes()` grava o primeiro quadro após uma mudança. Quando o professor revela os
+bullets aos poucos, isso guarda o slide incompleto, e o OCR desse quadro teria recall baixo por culpa da
+extração, não do motor (contaminaria a RQ2). Num teste com dois prints reais de aula (slide com 1 bullet e
+depois com a lista completa), o `keyframes` gravou só o quadro parcial e não percebeu a revelação.
+
+**Decisão do usuário.** Vídeos são apresentações de slides; às vezes o professor aparece, às vezes num
+canto. Criar `extract.slides()` mantendo `keyframes()` como baseline. PDF "apostila" e vínculo
+slide ↔ transcrição ficam para depois, mas são requisito importante.
+
+| # | Decisão | Status |
+|---|---|---|
+| D5 | Detecção por máscara de tinta com duas medidas (`mantido`, `acrescido`): bullet novo só acrescenta tinta, slide novo remove tinta antiga. Candidato = quadro mais completo do episódio, gravado quando o slide troca ("buffer reverso") | `[PREMISSA]` |
+| D6 | `frames.json` ganha `t_complete`, `t_end`, `n_stages`, `visits`. **`t` continua sendo o início do slide**, então a página da F5 não muda | `[DECIDIDO]` (usuário autorizou) |
+| D7 | `pipeline.py` usa `slides` por padrão; `--frames-mode diff` volta ao baseline. `step_s` padrão passa a 0,5 s no modo `slides` | `[PREMISSA]` |
+| D8 | Limiares (`keep_thr` 0,9, `grow_eps` 0,01, `min_stable` 2, `min_slide_s` 2 s) sem calibração em vídeo real | `[PREMISSA]` calibrar com os vídeos da etapa 1; ablação F7 |
+
+**Avaliação prevista (sem números inventados).** Comparar `slides` × `keyframes` (baseline) contra um
+gabarito de tempo anotado à mão (início e "slide completo" de cada slide): recall de slides, duplicatas,
+quadros parciais e recall do OCR sobre o quadro final. Esse gabarito de tempo ainda não existe.
+
+**Teste em vídeo real (2026-11-12).** Aula do Coursera/Wharton (960×540, 7,6 min, professor em tela cheia
+alternando com slides). A primeira versão gravou o professor como "slide" e dividiu um slide em versão
+parcial e completa. Correções: filtro `max_ink` = 0,30 (D9) e fusão parcial/completo com título idêntico a
+≥ 95% (D10). Resultado, conferido a olho nas imagens: 6 slides de conteúdo, todos completos (um deles com 7
+estágios), mais os 2 cartões de logo; nenhum quadro do professor. Isso é inspeção visual de um único vídeo,
+não uma métrica; o gabarito de tempo continua pendente.
+
+| # | Decisão | Status |
+|---|---|---|
+| D9 | `max_ink` = 0,30: quadros com muita tinta (imagem natural) não são slide. Medido: slides 3–14%, professor 42–59% | `[PREMISSA]` |
+| D10 | Título "igual" só com ≥ 95% de coincidência (`TITLE_KEPT`); parcial e completo do mesmo slide viram um arquivo, com o quadro mais completo | `[PREMISSA]` |
+
+**Lote de 12 aulas (2026-11-12).** `extract.slides` rodou nas 12 aulas de "Financial Acumen for Non-Financial
+Managers" (1,6 a 3,7 s por vídeo de 6 a 14 min). Conferência visual em 3 vídeos: em 2 deles o professor ainda
+passava como slide (camisa azul em fundo escuro: só 29% de tinta). Correção D11.
+
+| # | Decisão | Status |
+|---|---|---|
+| D11 | `min_flat` = 0,35: exige fundo liso (fração de pixels a ±3 níveis da mediana). Professor 7–18%, slides e cartões ≥ 48% nos 62 quadros gravados | `[PREMISSA]` |
+
+Ressalva: as 12 aulas têm o mesmo visual e o mesmo professor; ajustar limiares nelas não prova que
+generalizam. O gabarito de tempo continua pendente.

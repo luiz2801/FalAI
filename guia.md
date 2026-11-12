@@ -1,6 +1,6 @@
 # guia.md — Mapa do projeto Tema 9
 
-**Versão 0.2 — 2026-11-11**
+**Versão 0.3 — 2026-11-12**
 
 > Complementa o [CLAUDE.md](CLAUDE.md) (regras, decisões e roadmap). Descreve **o que existe hoje** e o contrato de cada módulo, para não precisar reler o código inteiro. O que está marcado com ⏳ é planejado.
 > Os detalhes de cada etapa (com trechos de código) estão no [guia de implementação](../Tema09_MVP_Guia_de_Implementacao.md), fora do repositório.
@@ -15,6 +15,8 @@
 >
 > Este guia é uma foto do estado atual. Histórico de decisões vai em [docs/decisoes.md](docs/decisoes.md).
 
+**Mudanças da 0.3:** `extract.slides()` e `SlideTracker` (um quadro completo por slide, mesmo com bullets revelados aos poucos); `frames.json` ganha `t_complete`, `t_end`, `n_stages` e `visits`; `pipeline.py` ganha `--frames-mode` (padrão `slides`; `diff` é o baseline antigo). Detalhes em docs/decisoes.md (2026-11-12).
+
 **Mudanças da 0.2:** código das etapas 2, 4 e 5 e da F9, vindo da junção com o plano paralelo (docs/decisoes.md, 2026-11-11). Contrato do `raw.csv` ampliado (seção 5.5); novos arquivos de gabarito (5.7 a 5.9).
 
 ---
@@ -26,7 +28,7 @@
 | 0. Ambiente | `pyproject.toml`, `uv.lock`, `.python-version`, `Dockerfile`, `docker-compose.yml`, `.dockerignore`, `README.md`, `.gitignore`, `tests/test_smoke.py` | 🟡 build OK no contêiner; falta o NVIDIA Container Toolkit (teste de GPU) e o Tesseract `por` no host |
 | 1. Dataset e gabarito | `data/raw/`, `data/gt/` | ⏳ depende de licença e de transcrição manual. Há exemplos de formato em `data/gt/*.example.*` |
 | 2. STT (F1, parte de F3 e F4) | `extract.py` (áudio), `stt.py`, `degrade.py` (ruído), `metrics.py` | ✅ código e testes. Testado de ponta a ponta com um vídeo e gabarito temporários, apagados depois |
-| 3. OCR (F2, parte de F3 e F4) | `extract.keyframes` ✅, `degrade.degrade_image` ✅, `ocr.py` ⏳, `metrics.word_pr` ✅ | 🟡 falta o `ocr.py` e o Tesseract `por` |
+| 3. OCR (F2, parte de F3 e F4) | `extract.slides` ✅, `extract.keyframes` ✅ (baseline), `degrade.degrade_image` ✅, `ocr.py` ⏳, `metrics.word_pr` ✅ | 🟡 falta o `ocr.py` e o Tesseract `por` |
 | 4. Experimentos (F4) | `run_experiments.py` (RQ1, I5 e F9), `report.py` | 🟡 RQ1 pronta; RQ2 entra com o `ocr.py` |
 | 5. Interface (F5) | `pipeline.py`, `web/index.html` | ✅ player com legenda, slides, transcrição, busca e tópicos clicáveis. Backup da demo ⏳ |
 | 6. Artigo | `artigo/` | 🟡 esqueleto; `[PENDENTE]` modelo SBC |
@@ -61,7 +63,8 @@ data/raw/aulaNN.mp4
   │        ├─► data/derived/aulaNN/stt/aulaNN.<modelo>.<condição>.{vtt,srt,txt,json}  (análise de erros)
   │        └─► metrics.wer, cer, term_accuracy ──► results/raw.csv
   │
-  ├─ extract.keyframes (step_s, thr) ──► data/derived/aulaNN/frames/NNNN.png + frames.json
+  ├─ extract.slides (step_s, keep_thr, ...) ──► data/derived/aulaNN/frames/NNNN.png (quadro completo) + frames.json
+  │        (extract.keyframes = baseline por diferença de quadros)
   │        ├─ degrade.degrade_image (resize, blur, jpeg)
   │        └─ ocr.* ⏳ ──► slides.json (t, file, texto) + tempo ──► metrics.cer, word_pr ──► raw.csv
   │
@@ -114,9 +117,24 @@ pipeline.py: aulaNN.mp4 ──► transcrição + keyframes (+ resumo) ──►
 | `clip_audio(media, out_wav, start_s, dur_s)` | Recorta o trecho com gabarito (corta o áudio antes de transcrever) |
 | `load_audio(media) -> np.ndarray` | float32, 16 kHz, mono, em memória. É o que o `stt.transcribe` usa (armadilha 7.2.10) |
 | `media_duration(media)` | Duração pelo `ffprobe` |
-| `keyframes(video, out_dir, step_s=1.0, thr=0.04) -> list[dict]` | Ver abaixo |
+| `slides(video, out_dir, step_s=0.5, **kwargs) -> list[dict]` | Um quadro completo por slide (ver abaixo). Usado pelo `pipeline.py` |
+| `SlideTracker(out_dir=None, ...)` | Núcleo de `slides`: `feed(t, quadro)` e `finish(t_fim)`. Aceita quadros em memória (testes) |
+| `keyframes(video, out_dir, step_s=1.0, thr=0.04) -> list[dict]` | Baseline: primeiro quadro após cada mudança (ver abaixo) |
 
-**`keyframes`**: amostra um quadro a cada `step_s` segundos com leitura sequencial (`cap.grab()`, sem seek). Reduz para 320×180 em cinza e guarda o quadro quando a diferença média para o último keyframe guardado (0–1) passa de `thr`. Grava `NNNN.png` (quadro original) e `frames.json` (`[{"t", "file"}]`) e devolve a lista. Cria `out_dir` se não existir e confere o retorno do `cv2.imwrite`.
+**`slides`**: resolve o caso do professor que revela os bullets aos poucos (o `keyframes` guarda o primeiro quadro após a mudança, ou seja, o slide incompleto). Leitura sequencial, um quadro a cada `step_s`. Cada quadro vira uma máscara de "tinta" (pixels diferentes do fundo, em 480×270 cinza). Comparado ao quadro candidato do episódio: `mantido` = fração da tinta do candidato que continua (tolerância de 1 px); `acrescido` = fração da tinta atual que é nova.
+
+- `mantido ≥ keep_thr` (0,9) e `acrescido > grow_eps` (0,01): o slide cresceu; o quadro atual vira o candidato (`n_stages` + 1).
+- `mantido < keep_thr`, ou a faixa do cabeçalho (22% superiores) mudou (< 0,8 mantido): slide novo. O candidato do episódio anterior é gravado, que é o último quadro estável antes da troca ("buffer reverso").
+- Só quadros **estáveis** são considerados (iguais aos `min_stable` = 2 amostras anteriores): fade, mão e cursor passando não entram.
+- Episódios com menos de `min_slide_s` (2 s) são descartados. Tela sem conteúdo (menos de `min_ink` = 0,2% de tinta) ou com tinta demais (mais de `max_ink` = 30%: imagem natural, como o professor em tela cheia) fecha o episódio e não abre outro. Nos slides de teste a tinta ficou entre 3% e 14%; no professor, 42% e 59%.
+- Também fecha o episódio o quadro com pouco **fundo liso** (`min_flat` = 0,35: fração de pixels a ±3 níveis da mediana). Só a tinta não bastava: o professor de camisa azul em fundo escuro tinha 29%. Medido em 62 quadros: professor 7% a 18%, slides e cartões ≥ 48%.
+- O cabeçalho só conta como "o mesmo" se ≥ 95% dele coincidir (`TITLE_KEPT`). Com 0,8, "Revenue" e "Expenses" passavam por acaso (0,83 a 0,90).
+- **Professor no canto:** células da grade 16×9 cuja luminância muda quase a cada amostra (EMA > 0,4) entram numa máscara de instabilidade e saem da comparação (o quadro gravado continua inteiro). `ignore=[(x0, y0, x1, y1), ...]` (frações do quadro) fixa regiões à mão; `roi` limita a região analisada (por exemplo, para cortar a barra do player).
+- **Slide revisitado:** se o candidato for igual (nos dois sentidos), ou parcial/completo do mesmo título, de um slide já gravado, não gera arquivo novo; a visita entra em `visits`. Se a volta trouxer o slide **mais completo**, o quadro novo substitui o arquivo anterior e `t_complete` passa a ser o da volta.
+
+Saída: `NNNN.png` (quadro original) e `frames.json` (contrato 5.3). Cria `out_dir` e confere o `cv2.imwrite`.
+
+**`keyframes`** (baseline): amostra um quadro a cada `step_s` segundos com leitura sequencial (`cap.grab()`, sem seek). Reduz para 320×180 em cinza e guarda o quadro quando a diferença média para o último keyframe guardado (0–1) passa de `thr`. Grava `NNNN.png` (quadro original) e `frames.json` (`[{"t", "file"}]`) e devolve a lista. Cria `out_dir` se não existir e confere o retorno do `cv2.imwrite`.
 
 ### 4.2 `src/stt.py` (etapa 2)
 
@@ -231,7 +249,7 @@ Também: `backend_status(backend, model)` (motivo da indisponibilidade ou `None`
 
 **5.2 Gabarito de slides** `data/gt/<video>.slides.json`: lista `[{"t": 125.0, "texto": "..."}]`, `t` em segundos. Use `texto`, a mesma chave da saída (docs/decisoes.md).
 
-**5.3 Slides derivados** `frames.json` (`[{"t", "file"}]`) e `slides.json` da página (`[{"t", "file", "texto"}]`; `texto` vazio até o OCR).
+**5.3 Slides derivados** `frames.json` de `extract.slides`: `[{"t", "t_complete", "t_end", "n_stages", "visits", "file"}]` (`t` = início do slide, é para onde o clique salta; `t_complete` = quando ficou completo; `visits` = `[[início, fim], ...]`). O baseline `keyframes` grava só `{"t", "file"}`. `slides.json` da página: `[{"t", "file", "texto"}]` mais `t_complete`, `t_end` e `n_stages` quando existem; `texto` vazio até o OCR.
 
 **5.4 Legenda** `.vtt`: `WEBVTT`, linha em branco, blocos `HH:MM:SS.mmm --> HH:MM:SS.mmm` com o texto nas linhas seguintes (no máximo 2 linhas de 42 caracteres). O `.srt` segue o mesmo corte, numerado. O `.segments.srt` tem um bloco por segmento e é a entrada do LLM.
 
@@ -279,9 +297,11 @@ Todos valem igual para todos os modelos e motores de uma mesma comparação.
 | Legenda | 42 caracteres × 2 linhas, até 7 s | `stt.subtitle_blocks` | |
 | Tesseract | `lang="por"`, `--psm 6` | `ocr.ocr_tesseract` ⏳ | Testar `--psm 3` |
 | EasyOCR | `["pt"]`, `gpu=True` | `ocr.py` ⏳ | Ver armadilha 7.2.1 |
-| `step_s` (keyframes) | 1,0 s | `extract.keyframes` | Ablação F7 |
-| `thr` (keyframes) | 0,04 | `extract.keyframes` | Calibrar entre 0,03 e 0,05 olhando as imagens. Meta: ~1 keyframe por slide |
-| Resolução de análise | 320×180, cinza | `extract.keyframes` | Só para comparar quadros |
+| `step_s` (slides) | 0,5 s | `extract.slides` | Ablação F7 |
+| `keep_thr`, `grow_eps`, `min_stable`, `min_slide_s`, `max_ink`, `min_flat` (slides) | 0,9; 0,01; 2; 2,0 s; 0,30; 0,35 | `extract.SlideTracker` | `[PREMISSA]` sem calibração em vídeo real ainda. Ablação F7 |
+| `step_s` (keyframes, baseline) | 1,0 s | `extract.keyframes` | |
+| `thr` (keyframes, baseline) | 0,04 | `extract.keyframes` | Calibrar entre 0,03 e 0,05 olhando as imagens. Meta: ~1 keyframe por slide |
+| Resolução de análise | 320×180 cinza (keyframes); 480×270 (slides) | `extract.py` | Só para comparar quadros |
 | SNR | limpo, 20, 10, 0 dB | RQ1 | |
 | Seed do ruído | 0 | `degrade.add_noise` | |
 | Degradações de imagem | resize 0,5; blur 9; JPEG 30 | RQ2 | |
@@ -325,7 +345,8 @@ Todos valem igual para todos os modelos e motores de uma mesma comparação.
 13. **Duas normalizações diferentes** (uma no gabarito, outra na saída) inflam o WER. Usar só `norm()`.
 14. **Referência vazia** em WER ou CER não tem significado. `metrics.wer` levanta `ValueError`.
 15. **Ruído branco é simplificação.** O recorte em [-1, 1] pode alterar o SNR efetivo. O `add_noise` devolve o SNR medido, e o `run_experiments.py` avisa se ele fugir ±0,5 dB do alvo.
-16. **Professor se movendo** gera keyframes falsos. Saídas: recortar a região do slide, ou agrupar quadros consecutivos cujo OCR tenha ≥ 90% de igualdade.
+16. **Professor se movendo** gera keyframes falsos no baseline. No `slides`, a máscara de instabilidade cobre o professor num canto; se ele ocupar a tela inteira (câmera em tela cheia), o quadro pode virar "slide". Saídas: `ignore`/`roi`, ou agrupar quadros consecutivos cujo OCR tenha ≥ 90% de igualdade.
+    - **Limites conhecidos do `slides`:** (a) um overlay fixo que só acrescenta tinta (ícone de pausa do player) pode virar o quadro candidato; (b) um slide diferente com o mesmo título e conteúdo contido no outro seria fundido; (c) fundo com imagem ou degradê ruidoso satura a máscara de tinta; (d) cartões de logo (abertura e encerramento) saem como slides; (e) os limiares foram ajustados em vídeos de um único curso (Coursera/Wharton, 12 aulas), mesmo visual e mesmo professor, sem gabarito de tempo: pode não generalizar.
 17. **Amostra pequena.** 6 vídeos e 2 a 3 min de gabarito por vídeo. Reportar desvio e tamanho da amostra, sem tratar o resultado como prova.
 18. **Saída de IA sem leitura.** Classificar os erros (nomes próprios, siglas, números, sotaque, ruído). As hipóteses ficam em `data/derived/<video>/stt/`.
 19. **Alucinações do Whisper em silêncio** ("Legendas pela comunidade Amara.org", loops de repetição) inflam o WER com inserções. O `clean_segments` remove as conhecidas e registra o que removeu (`removed` no `.json`).
@@ -348,7 +369,7 @@ Todos valem igual para todos os modelos e motores de uma mesma comparação.
 | `tests/test_metrics.py` | `norm` com acentos; WER e CER à mão; referência vazia; `wer_detail`; `word_pr`; `rtf`; `term_accuracy` |
 | `tests/test_stt_vtt.py` | `fmt`; `write_vtt` (cabeçalho e blocos); `write_srt`; blocos dentro dos limites e sem órfãos; `clean_segments`; `plain_text`; `build_prompt` |
 | `tests/test_degrade.py` | `add_noise`: SNR medido a ±0,5 dB do alvo em 20, 10 e 0 dB; mesma semente, mesmo resultado; `degrade_image` mantém o tamanho e recusa `kind` desconhecido |
-| `tests/test_extract.py` | `keyframes` em vídeo sintético (3 "slides" → 3 keyframes); `out_dir` inexistente; áudio 16 kHz mono; recorte |
+| `tests/test_extract.py` | `keyframes` em vídeo sintético (3 "slides" → 3 keyframes); `out_dir` inexistente; áudio 16 kHz mono; recorte. `SlideTracker`/`slides`: bullets revelados (quadro final completo, volta ao slide sem duplicar), professor no canto (ruído), professor em tela cheia, volta mais completa substitui a parcial, relance transitório, gravação de arquivos e `frames.json` |
 | `tests/test_summarize.py` | `extract_topics`; capítulos; backend desconhecido; requisição ao Ollama (simulada); requisição ao Claude com o SDK real e transporte HTTP simulado (fallback, streaming, custo) |
 
 Regras: testes sem rede e sem carregar modelo do Whisper ou do EasyOCR.
@@ -360,7 +381,7 @@ Regras: testes sem rede e sem carregar modelo do Whisper ou do EasyOCR.
 | Quero… | Mexa em… |
 |---|---|
 | Adicionar um modelo de STT | `--models` do `run_experiments.py` e a matriz da RQ1 do CLAUDE.md |
-| Ajustar a sensibilidade de troca de slide | `extract.keyframes` (`thr`, `step_s`). Registrar em `docs/decisoes.md` |
+| Ajustar a sensibilidade de troca de slide | `extract.SlideTracker` (`keep_thr`, `grow_eps`, `step_s`; no baseline, `keyframes` `thr`). Registrar em `docs/decisoes.md` |
 | Adicionar um motor de OCR | `ocr.py` (função `(path) -> (texto, tempo_s)`), `run_experiments.py` e teste |
 | Adicionar uma condição de ruído ou degradação | `degrade.py`, `run_experiments.CONDITIONS` e a seção 5.5 |
 | Adicionar uma métrica | `metrics.py`, uma linha em `raw.csv` e uma tabela ou figura em `report.py` |

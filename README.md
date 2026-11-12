@@ -9,7 +9,7 @@ Pipeline de transcrição (STT), keyframes e OCR de slides, resumo por LLM e ava
 ```
 Vídeo ─► FFmpeg (16 kHz mono) ─► Whisper (STT) ─► .vtt / .txt ─────────┐
   │              └─ ruído (SNR 20/10/0 dB) ─► WER, RTF ─► results/raw.csv ─► tabelas e figuras
-  ├─► keyframes (OpenCV) ─► OCR ⏳ ─► slides.json ───────────────────────┤
+  ├─► slides completos (OpenCV) ─► OCR ⏳ ─► slides.json ───────────────────────┤
   └─► transcrição ─► LLM (Ollama ou Claude) ─► resumo + capítulos ────────┴─► página (web/)
 ```
 
@@ -118,7 +118,7 @@ Versões fixadas em `pyproject.toml` e travadas em `uv.lock`. Para atualizar uma
 ```
 Dockerfile, docker-compose.yml   imagem CUDA 12.4 + FFmpeg + Tesseract (por) e serviço de desenvolvimento
 pyproject.toml, uv.lock          dependências fixadas
-src/extract.py                   áudio, recorte e keyframes
+src/extract.py                   áudio, recorte, slides completos e keyframes (baseline)
 src/stt.py                       faster-whisper, legendas (.vtt/.srt) e texto
 src/degrade.py                   ruído e degradação de imagem
 src/metrics.py                   WER, CER, precisão/recall, RTF, acerto de termos
