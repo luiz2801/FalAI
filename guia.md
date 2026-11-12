@@ -349,6 +349,7 @@ Funções puras. Nenhuma lê arquivo.
 | `wer_detail(ref, hyp)` | WER com substituições, remoções, inserções e tamanho da referência (análise de erros, regra 11) |
 | `word_pr(ref, hyp) -> (precisao, recall)` | Multiconjunto de palavras; ignora a ordem |
 | `rtf(tempo_proc_s, duracao_s)` | Tempo de processamento / duração da mídia |
+| `align(ref, hyp)` | O alinhamento do WER em trechos `equal`/`substitute`/`delete`/`insert`, com as palavras normalizadas de cada lado. Base da tela Erros do Studio |
 | `term_accuracy(ref, hyp, terms)` | I5: ocorrências de cada termo na hipótese, limitadas às da referência, sobre o total na referência; e falsos positivos |
 | `precision_at_k`, `recall_at_k`, `mrr` ⏳ (F6) | Métricas de busca |
 

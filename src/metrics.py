@@ -39,6 +39,15 @@ def wer_detail(ref: str, hyp: str) -> dict:
             "insertions": out.insertions, "ref_words": sum(len(r) for r in out.references)}
 
 
+def align(ref: str, hyp: str) -> list[dict]:
+    """Alinhamento palavra a palavra (o mesmo do WER) em trechos `equal`, `substitute`, `delete` e
+    `insert`, cada um com as palavras normalizadas de `ref` e `hyp`. Base da análise de erros (regra 11)."""
+    out = jiwer.process_words(_checar_ref(ref), norm(hyp))
+    r, h = out.references[0], out.hypotheses[0]
+    return [{"op": c.type, "ref": r[c.ref_start_idx:c.ref_end_idx], "hyp": h[c.hyp_start_idx:c.hyp_end_idx]}
+            for c in out.alignments[0]]
+
+
 def word_pr(ref: str, hyp: str) -> tuple[float, float]:
     """Precisão e recall de palavras por multiconjunto (ignora a ordem; bom para slides)."""
     r, h = Counter(norm(ref).split()), Counter(norm(hyp).split())

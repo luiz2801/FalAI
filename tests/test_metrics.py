@@ -46,3 +46,15 @@ def test_term_accuracy():
     assert r["terms_hit"] == 2  # um jitter + um RTP
     assert r["false_positives"] == 1  # RTP a mais
     assert metrics.term_accuracy("nada aqui", "nada", ["jitter"])["accuracy"] is None
+
+
+def test_align_matches_wer_counts():
+    from metrics import align, wer_detail
+
+    ref, hyp = "A casa azul, é bonita demais.", "a cada azul bonita demais sim"
+    chunks = align(ref, hyp)
+    assert [c["op"] for c in chunks] == ["equal", "substitute", "equal", "delete", "equal", "insert"]
+    assert chunks[1] == {"op": "substitute", "ref": ["casa"], "hyp": ["cada"]}
+    d = wer_detail(ref, hyp)
+    erros = sum(len(c["ref"]) if c["op"] != "insert" else len(c["hyp"]) for c in chunks if c["op"] != "equal")
+    assert erros == d["substitutions"] + d["deletions"] + d["insertions"]
