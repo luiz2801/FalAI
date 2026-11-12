@@ -31,6 +31,7 @@
 | 3. OCR (F2, parte de F3 e F4) | `extract.slides` ✅, `extract.keyframes` ✅ (baseline), `degrade.degrade_image` ✅, `ocr.py` ⏳, `metrics.word_pr` ✅ | 🟡 falta o `ocr.py` e o Tesseract `por` |
 | 4. Experimentos (F4) | `run_experiments.py` (RQ1, I5 e F9), `report.py` | 🟡 RQ1 pronta; RQ2 entra com o `ocr.py` |
 | 5. Interface (F5) | `pipeline.py`, `web/index.html` | ✅ player com legenda, slides, transcrição, busca e tópicos clicáveis. Backup da demo ⏳ |
+| GUI de trabalho | `studio.py`, `web/studio.html` | ✅ biblioteca, processar, experimentos, resultados, gabarito, análise de erros e A/B. Testada com dados sintéticos; falta uso com dados reais (etapa 1) |
 | 6. Artigo | `artigo/` | 🟡 esqueleto; `[PENDENTE]` modelo SBC |
 | Desejável | F6 (busca com métricas), F7 (ablação) | ⏳ a busca da página já faz substring sobre fala e slides; faltam as consultas e `precision_at_k`, `mrr` |
 | Opcional | F8 (HLS) ⏳; F9 (resumo por LLM) ✅ `summarize.py`, `eval_summaries.py` | |
@@ -96,8 +97,9 @@ pipeline.py: aulaNN.mp4 ──► transcrição + keyframes (+ resumo) ──►
 | `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm pipeline` | Os mesmos testes no contêiner | Ver README |
 | `uv lock` | Atualiza o `uv.lock` depois de mudar uma versão no `pyproject.toml` | Não usar `pip install` avulso |
 | `uv run python src/stt.py <mídia> --model small` | Transcreve uma mídia (`.vtt`, `.srt`, `.txt`, `.json`) | `--vocab data/gt/terms.txt` para o I5 |
-| `uv run python src/pipeline.py data/raw/aulaNN.mp4 --model small` | Vídeo de ponta a ponta e pacote da demo em `web/data/` | `--summary ollama` ou `--summary claude` para a F9; sem LLM, o resumo é pulado |
 | `uv run python src/extract.py <vídeo>` | Só os slides completos, sem STT (ver 3.1; no Docker, 3.2) | Grava em `data/derived/<vídeo>/frames/` |
+| `uv run python src/pipeline.py data/raw/aulaNN.mp4 --model small` | Vídeo de ponta a ponta e pacote da demo em `web/data/` | `--summary ollama` ou `--summary claude` para a F9; sem LLM, o resumo é pulado |
+| `uv run --extra gui python src/studio.py` | FalAI Studio (GUI): vídeos, processar, experimentos, resultados, gabarito, erros e A/B | http://127.0.0.1:8000. Só em localhost, sem autenticação. Ver 4.10 |
 | `cd web && python -m http.server` | Serve a demo | Porta 8000. `file://` não funciona (o `fetch` é bloqueado) |
 | `uv run python src/run_experiments.py` | RQ1: `tiny`, `base`, `small` × limpo/20/10/0 dB × 3 repetições → `results/raw.csv` | `--models`, `--reps`, `--vocab` (I5), `--no-clean`, `--redo`. Pula o que já está no CSV |
 | `uv run python src/run_experiments.py --summaries --backend ollama` | F9: transcreve os vídeos inteiros e gera 2 resumos por modelo | `--backend claude --confirm-paid` para a API paga |
@@ -105,8 +107,6 @@ pipeline.py: aulaNN.mp4 ──► transcrição + keyframes (+ resumo) ──►
 | `uv run python src/report.py` | Tabelas e figuras a partir do CSV | Sem argumentos |
 | `ollama pull qwen2.5:7b` | Baixa o LLM local padrão da F9 (~4,7 GB) | O usuário executa |
 | `tesseract --list-langs \| grep por` | Confirma o idioma português do Tesseract | Instalação de sistema: o usuário executa |
-
----
 
 ### 3.1 Como rodar a extração de slides
 
@@ -274,6 +274,8 @@ O `web/` também precisa ser montado, porque o pipeline grava a demo em `web/dat
 | `OpenCV não abriu <vídeo>` | O caminho está errado *dentro* do contêiner | Use o caminho do contêiner (`/videos/...`, `data/raw/...`), não o do host |
 | Mudei o código e nada mudou | `src/` não foi montado | Inclua `-v "$PWD/src:/app/src:ro"` |
 
+---
+
 ## 4. Módulos
 
 ### 4.1 `src/extract.py` (etapas 2 e 3)
@@ -347,9 +349,9 @@ Funções puras. Nenhuma lê arquivo.
 | `norm(t) -> str` | Minúsculas, pontuação trocada por espaço (`[^\w\s]`), acentos mantidos, espaços colapsados. **É a única normalização do projeto.** |
 | `wer(ref, hyp)`, `cer(ref, hyp)` | `jiwer` sobre os textos normalizados. Referência vazia → `ValueError` |
 | `wer_detail(ref, hyp)` | WER com substituições, remoções, inserções e tamanho da referência (análise de erros, regra 11) |
+| `align(ref, hyp)` | O alinhamento do WER em trechos `equal`/`substitute`/`delete`/`insert`, com as palavras normalizadas de cada lado. Base da tela Erros do Studio |
 | `word_pr(ref, hyp) -> (precisao, recall)` | Multiconjunto de palavras; ignora a ordem |
 | `rtf(tempo_proc_s, duracao_s)` | Tempo de processamento / duração da mídia |
-| `align(ref, hyp)` | O alinhamento do WER em trechos `equal`/`substitute`/`delete`/`insert`, com as palavras normalizadas de cada lado. Base da tela Erros do Studio |
 | `term_accuracy(ref, hyp, terms)` | I5: ocorrências de cada termo na hipótese, limitadas às da referência, sobre o total na referência; e falsos positivos |
 | `precision_at_k`, `recall_at_k`, `mrr` ⏳ (F6) | Métricas de busca |
 
@@ -381,6 +383,7 @@ Só lê `results/raw.csv` (com duplicatas, vale a última linha) e produz o que 
 | `figures/fig2_rtf_wer` | RTF × WER no áudio limpo, um ponto por modelo (trade-off) |
 | `figures/fig3_termos_vocabulario` | I5: acerto de termos com e sem `initial_prompt` |
 | `figures/fig4_wer_nota_resumo` | F9: WER do modelo × nota do resumo (pergunta secundária) |
+| `tables/tabela5_erros_classificados` | Regra 11: trechos de erro classificados à mão (`results/erros.csv`), por modelo × categoria |
 | Tabela 2 (OCR) ⏳ | CER, precisão e recall por motor × degradação |
 
 Tabelas em `.csv` e `.md`; figuras em `.png` (300 dpi) e `.pdf`. Nenhum número digitado à mão.
@@ -408,6 +411,31 @@ Também: `backend_status(backend, model)` (motivo da indisponibilidade ou `None`
 - `prepare`: copia os resumos para `results/eval/blind/R001.md…` em ordem embaralhada (seed 42) e cria `key.csv` (não enviar), `scores.csv`, `fidelity.csv` e `topics.csv`.
 - `topics.csv` traz a cobertura e a precisão dos timestamps (±30 s) **estimadas**, casando títulos por Jaccard das palavras de conteúdo (limiar 0,4) contra `data/gt/<video>.topics.txt`. Corrija nas colunas `*_manual`.
 - `consolidate`: grava no `raw.csv` as linhas `tarefa=resumo` com `nota_media`, `fidelidade`, `cobertura` e `precisao_timestamps`.
+
+### 4.10 `src/studio.py` e `web/studio.html` (FalAI Studio, a GUI de trabalho)
+
+`uv run --extra gui python src/studio.py` → http://127.0.0.1:8000. Servidor FastAPI (extra `gui` do `pyproject.toml`) que serve `web/` e a API abaixo. Escuta só em 127.0.0.1, sem autenticação. A página é HTML e JS sem build, com tema claro e escuro e navegação por hash (`#lib`, `#run`, `#exp`, `#res`, `#gt`, `#err`, `#ab`).
+
+| Tela | O que faz | Rotas | Grava |
+|---|---|---|---|
+| Vídeos | Biblioteca com status (STT, slides, OCR ⏳, resumo, trecho, gabarito); envio com licença obrigatória | `GET`/`POST /api/videos` | `data/raw/<nome>`, `data/raw/licenses.json` |
+| Processar | `pipeline.process` com etapas e log ao vivo; mostra o comando CLI equivalente | `POST /api/jobs` | o mesmo do `pipeline.py` |
+| Experimentos | Matriz da RQ1 (modelos × condições × repetições, `--vocab`, `--no-clean`, `--redo`) ou da F9; plano com o que está pendente; roda e interrompe | `POST /api/experiments/plan`, `POST /api/experiments` | o mesmo do `run_experiments.py` |
+| Resultados | WER/CER × SNR (linhas por modelo), RTF × erro (dispersão), tabelas média ± desvio (n), tempo, termos (I5), resumos (F9), hardware; filtro por vídeo; botão que roda o `report.py` e galeria das figuras | `GET /api/results`, `POST /api/report`, `GET /api/results/{table,figure}/<nome>` | só via `report.py` |
+| Gabarito | Escolhe o trecho no vídeo (início e duração) e transcreve ouvindo o áudio do trecho; atalhos de teclado; rascunho no navegador | `GET /api/gt`, `PUT /api/gt/<v>/clip`, `POST /api/gt/<v>/clip-audio`, `GET`/`PUT /api/gt/<v>/text`, `GET /api/raw/<arq>`, `GET /api/media/<v>/<cond>` | `data/gt/clips.csv`, `data/gt/<v>.stt.txt`, `data/derived/<v>/<v>.clip.limpo.wav` |
+| Erros | Diff gabarito × hipótese (`metrics.align`), classificação de cada trecho de erro por categoria (D12), resumo por modelo | `GET /api/errors/sources`, `GET /api/errors/<v>/<modelo>/<cond>`, `PUT …/<idx>`, `GET /api/errors/summary` | `results/erros.csv` (5.10) |
+| A/B | Mesmo trecho em duas condições, com WER/CER do `raw.csv`, legenda sincronizada e troca A/B na mesma posição (tecla A). Para a demo | `GET /api/ab/<v>/<modelo>/<cond>` | — |
+
+Regras que a GUI respeita:
+
+- **Números só do `raw.csv`** (regra 2): a tela Resultados agrega com `report.load` (duplicata vale a última linha) e mostra média ± desvio (n), com o mesmo desvio de `report._mean_sd` (0 quando n = 1). Erros e A/B mostram a média do `raw.csv` para aquele vídeo/modelo/condição. As contagens S/D/I da tela Erros vêm do alinhamento e servem à análise, não ao artigo.
+- **Gabarito humano** (regra 3): a tela Gabarito não mostra saída de modelo. Salvar um gabarito ou mudar o trecho de um vídeo que já tem linhas no `raw.csv` gera um aviso (o WER antigo usou o gabarito ou o trecho anterior; refaça com “refazer”). Mudar o trecho apaga os `.clip.*.wav` em cache do vídeo, porque `run_experiments.prepare_clip` só os gera se não existirem.
+- **API paga** (regra 12): resumo com Claude exige `confirm_paid` (HTTP 402 sem ele), na tela Processar e na de Experimentos.
+- **Reprodutibilidade**: experimentos e relatório rodam como subprocesso, com o mesmo comando do CLI (mostrado na tela). Interromper mata o subprocesso; rodar de novo retoma, porque o script pula o que já está no `raw.csv`.
+
+Trabalhos: fila única (a GPU é uma só), em memória; somem ao reiniciar o servidor. O processamento de um vídeo roda no próprio processo e não pode ser interrompido no meio; experimentos e relatório podem. A etapa do processamento vem do prefixo das mensagens de `progress` do pipeline (`STT`, `Slides`, `Keyframes`, `Resumo`, `Demo`; constante `STAGES`), e o progresso dos experimentos conta as linhas `[hh:mm:ss] …` que o `run_experiments.py` imprime por combinação ou por resumo (`_DONE_LINE`). Se mudar essas mensagens, mude as constantes. `CONDITIONS` e `EXTS` repetem as de `run_experiments`; um teste confere.
+
+As hipóteses das telas Erros e A/B são as que `run_experiments` guarda (repetição 1) em `data/derived/<v>/stt/<v>.<modelo>.<cond>.json`, só para vídeos com gabarito. O visualizador aceita `index.html?v=<id>`. O OCR aparece como ⏳ até a etapa 3.
 
 ---
 
@@ -444,6 +472,10 @@ Na tarefa `stt`, `modelo` pode ter o sufixo `-semfiltro` (`--no-clean`). Na tare
 **5.8 Tópicos reais** `data/gt/<video>.topics.txt` (F9): uma linha `[hh:mm:ss] Título` por tópico (ver `aula01.topics.example.txt`).
 
 **5.9 Vocabulário** `data/gt/terms.txt` (I5, opcional): um termo por linha; `#` comenta (ver `terms.example.txt`).
+
+**5.10 Erros classificados** `results/erros.csv` (regra 11; gravado pela tela Erros do Studio): `video,modelo,condicao,idx,tipo,ref,hyp,categoria,nota`. `idx` é a posição do trecho em `metrics.align(gabarito, hipótese)`; `tipo` é `substitute`, `delete` ou `insert`; `ref` e `hyp` são as palavras normalizadas do trecho (servem para detectar marcações desatualizadas quando o gabarito ou a hipótese muda); `categoria` é uma das chaves de D12. Uma linha por trecho marcado.
+
+**5.11 Licenças** `data/raw/licenses.json` (gravado pelo envio do Studio): `{"<arquivo>": "<licença/origem>"}`. Fica fora do git com `data/raw/`; a tabela do README continua sendo o registro oficial.
 
 ---
 
@@ -538,6 +570,7 @@ Todos valem igual para todos os modelos e motores de uma mesma comparação.
 | `tests/test_stt_vtt.py` | `fmt`; `write_vtt` (cabeçalho e blocos); `write_srt`; blocos dentro dos limites e sem órfãos; `clean_segments`; `plain_text`; `build_prompt` |
 | `tests/test_degrade.py` | `add_noise`: SNR medido a ±0,5 dB do alvo em 20, 10 e 0 dB; mesma semente, mesmo resultado; `degrade_image` mantém o tamanho e recusa `kind` desconhecido |
 | `tests/test_extract.py` | `keyframes` em vídeo sintético (3 "slides" → 3 keyframes); `out_dir` inexistente; áudio 16 kHz mono; recorte. `SlideTracker`/`slides`: bullets revelados (quadro final completo, volta ao slide sem duplicar), professor no canto (ruído), professor em tela cheia, volta mais completa substitui a parcial, relance transitório, gravação de arquivos e `frames.json` |
+| `tests/test_studio.py` | API do Studio com `TestClient` e pastas temporárias: constantes iguais às do `run_experiments`; nome seguro; upload (licença obrigatória, formato, duplicado); validação de jobs (caminho, modelo, vocabulário, nome do LLM, confirmação paga); cancelamento; etapa e progresso pelo log; plano de experimentos (pulo pelo `raw.csv`, `-semfiltro`, aquecimento); agregação dos resultados (duplicata vale a última); trecho e gabarito (cache apagado, avisos); alinhamento e marcações de erro (inclusive desatualizadas); A/B e áudio. Pulado sem o extra `gui` |
 | `tests/test_summarize.py` | `extract_topics`; capítulos; backend desconhecido; requisição ao Ollama (simulada); requisição ao Claude com o SDK real e transporte HTTP simulado (fallback, streaming, custo) |
 
 Regras: testes sem rede e sem carregar modelo do Whisper ou do EasyOCR.

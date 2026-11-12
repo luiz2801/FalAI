@@ -1,0 +1,1021 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FalAI Studio</title>
+<!-- GUI local do projeto (guia.md, 4.10). Precisa do servidor: uv run --extra gui python src/studio.py -->
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fcfcfb; --panel: #f3f2ef; --ink: #0b0b0b; --ink-2: #52514e; --ink-3: #8a8984; --line: #e4e3df;
+    --accent: #2a78d6; --ok: #1a7f4b; --bad: #c0392b; --warn: #9a6700;
+    --del-bg: #fde3e1; --del-ink: #9b1c13; --ins-bg: #dff3e7; --ins-ink: #0f5c34; --sel: #fff1c2;
+    /* paleta categórica (dataviz, references/palette.md), uma cor fixa por modelo */
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1a1a19; --panel: #242422; --ink: #f0efec; --ink-2: #c3c2b7; --ink-3: #8f8e86; --line: #3a3936;
+            --accent: #3987e5; --ok: #46b47a; --bad: #e5675a; --warn: #d9a441;
+            --del-bg: #4a1f1b; --del-ink: #ffb4ab; --ins-bg: #173a27; --ins-ink: #9be3b9; --sel: #4a3f12;
+            --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: .5rem 1.25rem; align-items: center; padding: .7rem 1rem; border-bottom: 1px solid var(--line);
+           position: sticky; top: 0; background: var(--bg); z-index: 5; }
+  header h1 { font-size: 1.05rem; margin: 0; }
+  nav { display: flex; flex-wrap: wrap; gap: .1rem; margin-right: auto; }
+  nav a { font: inherit; color: var(--ink-2); padding: .4rem .6rem; border-bottom: 2px solid transparent; text-decoration: none; }
+  nav a[aria-current="page"] { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+  #dev, #qbadge { color: var(--ink-2); font-size: .85rem; }
+  #qbadge a { color: var(--accent); }
+  main { max-width: 1240px; margin: 0 auto; padding: 1rem; }
+  h2 { font-size: 1rem; margin: 0 0 .6rem; }
+  h3 { font-size: .9rem; margin: .8rem 0 .4rem; }
+  .row { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 1rem; }
+  .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; }
+  .side { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 1rem; align-items: start; }
+  @media (max-width: 860px) { .cols, .side { grid-template-columns: 1fr; } }
+  .card { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--panel); display: flex; flex-direction: column; }
+  .card .thumb { aspect-ratio: 16 / 9; background: #000 center / cover; display: grid; place-items: center; color: #777; font-size: .85rem; }
+  .card .body { padding: .6rem .7rem; display: flex; flex-direction: column; gap: .4rem; flex: 1; }
+  .card h3 { margin: 0; font-size: .95rem; overflow-wrap: anywhere; }
+  .meta { color: var(--ink-2); font-size: .8rem; overflow-wrap: anywhere; }
+  .badges { display: flex; flex-wrap: wrap; gap: .3rem; }
+  .b { font-size: .75rem; padding: .05rem .45rem; border-radius: 99px; border: 1px solid var(--line); color: var(--ink-2); white-space: nowrap; }
+  .b.on { color: var(--ok); border-color: var(--ok); }
+  .b.on::before { content: "✔ "; }
+  .actions { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+  .card .actions { margin-top: auto; }
+  .btn { font: inherit; font-size: .85rem; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+         padding: .3rem .7rem; cursor: pointer; text-decoration: none; display: inline-block; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.danger { color: var(--bad); border-color: var(--bad); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .drop { border: 2px dashed var(--line); border-radius: 8px; padding: 1.2rem; text-align: center; color: var(--ink-2); cursor: pointer; }
+  .drop.over { border-color: var(--accent); background: var(--panel); }
+  .panel { border: 1px solid var(--line); border-radius: 8px; padding: 1rem; background: var(--panel); }
+  .panel + .panel, .cols + .panel, .panel + .cols, .cols + .cols, #r-body + .panel { margin-top: 1rem; }
+  .cols > .panel + .panel { margin-top: 0; }
+  form.grid, .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: .8rem 1rem; }
+  label { display: flex; flex-direction: column; gap: .2rem; font-size: .85rem; color: var(--ink-2); }
+  label.check { flex-direction: row; align-items: center; gap: .45rem; color: var(--ink); }
+  fieldset { border: 1px solid var(--line); border-radius: 6px; padding: .4rem .7rem .6rem; margin: 0; display: flex; flex-wrap: wrap; gap: .3rem 1rem; }
+  legend { font-size: .85rem; color: var(--ink-2); padding: 0 .3rem; }
+  select, input[type=text], input[type=number], textarea { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+         border-radius: 6px; padding: .35rem .5rem; }
+  textarea { width: 100%; min-height: 320px; resize: vertical; line-height: 1.6; }
+  .full { grid-column: 1 / -1; }
+  .warn { color: var(--warn); font-size: .85rem; }
+  .warn::before { content: "⚠ "; }
+  .err { color: var(--bad); }
+  .ok { color: var(--ok); }
+  .note { font-size: .85rem; color: var(--ink-2); border-left: 3px solid var(--line); padding-left: .6rem; margin: .5rem 0; }
+  code, pre { font: .8rem/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  pre { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: .6rem; overflow: auto; margin: 0; white-space: pre-wrap; }
+  .log { max-height: 300px; }
+  .steps { display: flex; gap: .5rem; flex-wrap: wrap; margin: .6rem 0; }
+  .step { flex: 1; min-width: 110px; padding: .4rem .6rem; border: 1px solid var(--line); border-radius: 6px; font-size: .85rem; color: var(--ink-2); }
+  .step.active { border-color: var(--accent); color: var(--ink); }
+  .step.active::after { content: " …"; }
+  .step.done { border-color: var(--ok); color: var(--ok); }
+  .step.done::after { content: " ✔"; }
+  progress { width: 100%; height: 10px; }
+  .list { display: flex; flex-direction: column; gap: .3rem; }
+  .li { display: flex; gap: .6rem; align-items: center; padding: .4rem .6rem; border: 1px solid var(--line); border-radius: 6px; cursor: pointer;
+        background: none; font: inherit; color: inherit; text-align: left; width: 100%; }
+  .li:hover { background: var(--panel); }
+  .li[aria-current="true"] { box-shadow: inset 3px 0 0 var(--accent); background: var(--panel); }
+  .li .s { margin-left: auto; font-size: .8rem; color: var(--ink-2); white-space: nowrap; }
+  .tablewrap { overflow-x: auto; }
+  table { border-collapse: collapse; font-size: .85rem; width: 100%; }
+  th, td { padding: .35rem .6rem; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--ink-2); font-weight: 600; }
+  .stat { display: flex; flex-wrap: wrap; gap: 1.2rem; margin: .4rem 0 .8rem; }
+  .stat div { font-size: .8rem; color: var(--ink-2); }
+  .stat strong { display: block; font-size: 1.2rem; color: var(--ink); font-variant-numeric: tabular-nums; }
+  /* gráficos */
+  .chart { position: relative; }
+  .chart svg { width: 100%; height: auto; display: block; overflow: visible; }
+  .chart text { font: 11px system-ui, sans-serif; fill: var(--ink-2); }
+  .chart .grid line { stroke: var(--line); }
+  .legend { display: flex; flex-wrap: wrap; gap: .3rem 1rem; font-size: .8rem; color: var(--ink-2); margin: .2rem 0 .4rem; }
+  .legend span { display: inline-flex; align-items: center; gap: .35rem; }
+  .legend i { width: 18px; height: 0; border-top: 2px solid; display: inline-block; }
+  .legend i.dash { border-top-style: dashed; }
+  .tip { position: absolute; pointer-events: none; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: .35rem .5rem;
+         font-size: .8rem; box-shadow: 0 2px 8px rgba(0,0,0,.12); white-space: nowrap; z-index: 2; }
+  .tip b { font-weight: 600; }
+  .tip .sw { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: .3rem; }
+  .figs { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: .8rem; }
+  .figs figure { margin: 0; border: 1px solid var(--line); border-radius: 6px; padding: .4rem; background: #fcfcfb; }
+  .figs img { width: 100%; display: block; }
+  .figs figcaption { font-size: .75rem; color: #52514e; }
+  /* diff da análise de erros */
+  .diff { line-height: 2.1; font-size: .95rem; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: .7rem .9rem; max-height: 60vh; overflow-y: auto; }
+  .diff .e { font: inherit; color: inherit; background: none; border: 1px solid transparent; border-radius: 4px; padding: 0 .15rem; cursor: pointer; }
+  .diff .e:hover, .diff .e.cur { border-color: var(--accent); background: var(--sel); }
+  .diff del { background: var(--del-bg); color: var(--del-ink); text-decoration: line-through; border-radius: 3px; padding: 0 .1rem; }
+  .diff ins { background: var(--ins-bg); color: var(--ins-ink); text-decoration: underline; border-radius: 3px; padding: 0 .1rem; }
+  .diff sup { font-size: .65rem; color: var(--ink-2); font-weight: 600; margin-left: .1rem; }
+  .diff .cat { font-size: .65rem; color: var(--ok); margin-left: .15rem; }
+  .cats { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: .3rem; margin: .5rem 0; }
+  .cats .btn { text-align: left; }
+  .cats .btn[aria-pressed="true"] { border-color: var(--ok); color: var(--ok); font-weight: 600; }
+  kbd { font: .75rem ui-monospace, monospace; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 .3rem; color: var(--ink-2); }
+  /* A/B */
+  .segs { max-height: 50vh; overflow-y: auto; display: flex; flex-direction: column; gap: .1rem; }
+  .seg { display: flex; gap: .5rem; text-align: left; font: inherit; color: inherit; background: none; border: 0; border-radius: 4px; padding: .25rem .4rem; cursor: pointer; }
+  .seg:hover { background: var(--bg); }
+  .seg.cur { background: var(--bg); box-shadow: inset 3px 0 0 var(--accent); }
+  .seg .t { color: var(--accent); font-size: .8rem; font-variant-numeric: tabular-nums; padding-top: .1rem; }
+  .ab-active { outline: 2px solid var(--accent); outline-offset: 2px; }
+  audio, video { width: 100%; }
+  video { border-radius: 6px; background: #000; max-height: 360px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>FalAI Studio</h1>
+  <nav>
+    <a href="#lib">Vídeos</a><a href="#run">Processar</a><a href="#exp">Experimentos</a><a href="#res">Resultados</a>
+    <a href="#gt">Gabarito</a><a href="#err">Erros</a><a href="#ab">A/B</a><a href="index.html" target="_blank" rel="noopener">Visualizador ↗</a>
+  </nav>
+  <span id="qbadge"></span>
+  <span id="dev"></span>
+</header>
+<main>
+  <!-- ================= Vídeos ================= -->
+  <section id="lib" data-view>
+    <div class="drop" id="drop" tabindex="0" role="button">Arraste um vídeo aqui ou clique para escolher (.mp4, .mkv, .webm, .mov)
+      <input id="file" type="file" accept="video/*,.mkv" hidden></div>
+    <form id="upform" class="panel" hidden style="margin-top:.8rem">
+      <h2 id="upname"></h2>
+      <label>Licença / origem do vídeo (obrigatória)
+        <input type="text" id="license" placeholder="ex.: gravação própria, com autorização; CC BY 4.0, https://…" required></label>
+      <p class="meta">Sem licença anotada o vídeo não entra no projeto (CLAUDE.md, regra 4). Fica em <code>data/raw/licenses.json</code>; copie também para a tabela do README.</p>
+      <div class="actions">
+        <button class="btn primary" id="upgo" type="submit">Enviar</button>
+        <button class="btn" id="upcancel" type="button">Cancelar</button>
+        <progress id="upprog" max="1" value="0" hidden style="max-width:240px"></progress>
+      </div>
+      <p class="err" id="uperr"></p>
+    </form>
+    <h2 style="margin-top:1.2rem">Biblioteca <span class="meta" id="libcount"></span></h2>
+    <div class="row" id="cards"></div>
+  </section>
+
+  <!-- ================= Processar ================= -->
+  <section id="run" data-view hidden>
+    <div class="panel">
+      <h2>Processar um vídeo de ponta a ponta</h2>
+      <p class="meta" style="margin-top:-.3rem">Transcrição, slides e, opcional, resumo. Monta o pacote do visualizador em <code>web/data/</code>.</p>
+      <form id="jobform" class="grid">
+        <label>Vídeo <select id="f-video" required></select></label>
+        <label>Modelo de STT <select id="f-model"></select></label>
+        <label>Dispositivo <select id="f-device"></select></label>
+        <label>Slides
+          <select id="f-frames"><option value="slides">Slide completo (padrão)</option><option value="diff">Baseline por diferença</option></select></label>
+        <label>Vocabulário (I5) <select id="f-vocab"><option value="">nenhum</option></select></label>
+        <label>Resumo (F9, opcional)
+          <select id="f-summary"><option value="">sem resumo</option><option value="ollama">Ollama (local)</option><option value="claude">Claude API (paga)</option></select></label>
+        <label>Modelo do LLM <input type="text" id="f-llm" placeholder="padrão do backend"></label>
+        <label>Intervalo (s) <input type="number" id="f-step" step="0.1" min="0.1" placeholder="padrão"></label>
+        <label class="check full" id="paidrow" hidden><input type="checkbox" id="f-paid"> Confirmo que a chamada à API do Claude gera custo.</label>
+        <p class="warn full" id="llmwarn" hidden></p>
+        <div class="full"><div class="meta">Comando equivalente (reprodutibilidade):</div><pre id="cmd"></pre></div>
+        <div class="actions full"><button class="btn primary" id="go" type="submit">Processar</button><span class="err" id="runerr"></span></div>
+      </form>
+    </div>
+    <div class="panel" id="runjob" hidden></div>
+    <div class="panel">
+      <h2>Fila de trabalhos</h2>
+      <p class="meta" style="margin-top:-.3rem">Um trabalho por vez (a GPU é única). A fila fica na memória do servidor e some ao reiniciá-lo.</p>
+      <div class="list" id="jobs"></div>
+    </div>
+  </section>
+
+  <!-- ================= Experimentos ================= -->
+  <section id="exp" data-view hidden>
+    <div class="panel">
+      <h2>Matriz de experimentos</h2>
+      <form id="expform" class="grid">
+        <fieldset class="full"><legend>Experimento</legend>
+          <label class="check"><input type="radio" name="mode" value="stt" checked> RQ1: STT × ruído</label>
+          <label class="check"><input type="radio" name="mode" value="summaries"> F9: resumo por LLM</label>
+        </fieldset>
+        <fieldset class="full"><legend>Modelos de STT</legend><span id="x-models" style="display:contents"></span></fieldset>
+        <fieldset class="full" data-mode="stt"><legend>Condições do áudio</legend><span id="x-conds" style="display:contents"></span></fieldset>
+        <label>Repetições <input type="number" id="x-reps" min="1" max="10" value="3"></label>
+        <label>Dispositivo <select id="x-device"></select></label>
+        <label data-mode="summaries">Backend do LLM
+          <select id="x-backend"><option value="ollama">Ollama (local)</option><option value="claude">Claude API (paga)</option></select></label>
+        <label data-mode="summaries">Modelo do LLM <input type="text" id="x-llm" placeholder="padrão do backend"></label>
+        <fieldset class="full"><legend>Opções</legend>
+          <label class="check" data-mode="stt"><input type="checkbox" id="x-vocab"> condição <code>limpo_vocab</code> (I5, precisa de data/gt/terms.txt)</label>
+          <label class="check" data-mode="stt"><input type="checkbox" id="x-noclean"> sem o filtro de alucinações (<code>-semfiltro</code>)</label>
+          <label class="check"><input type="checkbox" id="x-redo"> refazer o que já está no raw.csv</label>
+          <label class="check" data-mode="summaries" id="x-paidrow"><input type="checkbox" id="x-paid"> Confirmo que a API do Claude gera custo</label>
+        </fieldset>
+      </form>
+    </div>
+    <div class="panel" id="plan"></div>
+    <div class="panel" id="expjob" hidden></div>
+  </section>
+
+  <!-- ================= Resultados ================= -->
+  <section id="res" data-view hidden>
+    <div class="actions" style="margin-bottom:.8rem">
+      <label>Vídeo <select id="r-video"><option value="">todos</option></select></label>
+      <label>Métrica <select id="r-metric"><option value="wer">WER</option><option value="cer">CER</option></select></label>
+      <span style="margin-left:auto" class="actions">
+        <button class="btn" id="r-reload">Recarregar</button>
+        <button class="btn primary" id="r-report">Gerar tabelas e figuras (report.py)</button></span>
+    </div>
+    <div id="r-empty" class="panel" hidden><p class="meta">Ainda não há <code>results/raw.csv</code>. Rode a matriz na tela <a href="#exp">Experimentos</a>.</p></div>
+    <div id="r-body">
+      <p class="note">Todos os números desta tela vêm de <code>results/raw.csv</code> (CLAUDE.md, regra 2), com a mesma regra do <code>report.py</code>: repetição refeita vale pela última linha. Média ± desvio-padrão (n = execuções). Seis vídeos são uma amostra pequena: cautela nas conclusões.</p>
+      <div class="cols">
+        <div class="panel"><h2 id="c1-title">Robustez ao ruído</h2><div class="legend" id="c1-legend"></div><div class="chart" id="c1"></div></div>
+        <div class="panel"><h2 id="c2-title">Qualidade × custo (áudio limpo)</h2><div class="chart" id="c2"></div>
+          <p class="meta">Um ponto por modelo. RTF &lt; 1 é mais rápido que o tempo real.</p></div>
+      </div>
+      <div class="panel"><h2 id="t1-title">Erro por modelo e condição</h2><div class="tablewrap" id="t1"></div></div>
+      <div class="cols">
+        <div class="panel"><h2>Tempo de inferência</h2><div class="tablewrap" id="t2"></div></div>
+        <div class="panel"><h2>Hardware</h2><div id="hw" class="meta"></div></div>
+      </div>
+      <div class="panel" id="t3wrap" hidden><h2>Acerto de termos técnicos (I5)</h2><div class="tablewrap" id="t3"></div></div>
+      <div class="panel" id="t4wrap" hidden><h2>Resumos (F9)</h2><div class="tablewrap" id="t4"></div></div>
+    </div>
+    <div class="panel" id="repjob" hidden></div>
+    <div class="panel"><h2>Saídas do report.py</h2><p class="meta" style="margin-top:-.3rem">As figuras e tabelas que vão para o artigo (<code>results/figures/</code>, <code>results/tables/</code>).</p>
+      <div class="figs" id="figs"></div><h3>Tabelas</h3><div class="actions" id="tabs"></div><pre id="tabview" hidden style="margin-top:.6rem"></pre></div>
+  </section>
+
+  <!-- ================= Gabarito ================= -->
+  <section id="gt" data-view hidden>
+    <div class="side">
+      <div><h2>Vídeos</h2><div class="list" id="g-list"></div></div>
+      <div id="g-edit">
+        <p class="meta" id="g-none">Escolha um vídeo à esquerda.</p>
+        <div id="g-body" hidden>
+          <div class="panel">
+            <h2>1. Trecho com gabarito <span class="meta" id="g-name"></span></h2>
+            <p class="note">Comece o trecho no início de uma frase: cortes no meio da frase fazem o Whisper apagar o começo (guia.md, armadilha 21). Duração recomendada: 2 a 3 min.</p>
+            <video id="g-video" controls preload="metadata"></video>
+            <div class="actions" style="margin-top:.6rem">
+              <label>Início (s) <input type="number" id="g-start" step="0.1" min="0" style="width:8rem"></label>
+              <label>Duração (s) <input type="number" id="g-dur" step="1" min="10" max="900" value="150" style="width:7rem"></label>
+              <button class="btn" id="g-now">Usar posição atual como início</button>
+              <button class="btn" id="g-preview">Ouvir o trecho</button>
+              <button class="btn primary" id="g-saveclip">Salvar trecho</button>
+            </div>
+            <p class="meta" id="g-clipmsg"></p>
+          </div>
+          <div class="panel">
+            <h2>2. Transcrição humana</h2>
+            <p class="note">Transcreva do zero, ouvindo o áudio. Esta tela não mostra a saída de nenhum modelo, de propósito: corrigir a saída de um modelo enviesaria o WER a favor dele (CLAUDE.md, regra 3). Siga as regras de transcrição do README (números, hesitações, siglas). Caixa e pontuação são ignoradas pela métrica.</p>
+            <div id="g-noaudio" class="actions" hidden><span class="warn">O áudio do trecho ainda não foi gerado.</span><button class="btn" id="g-mkaudio">Gerar áudio do trecho</button></div>
+            <audio id="g-audio" controls preload="metadata"></audio>
+            <div class="actions meta" style="margin:.4rem 0">
+              <label class="check">Velocidade <select id="g-rate"><option>0.75</option><option selected>1</option><option>1.25</option></select></label>
+              <span><kbd>Esc</kbd> tocar/pausar · <kbd>Alt</kbd>+<kbd>←</kbd>/<kbd>→</kbd> voltar/avançar 3 s · <kbd>Ctrl</kbd>+<kbd>S</kbd> salvar</span>
+            </div>
+            <textarea id="g-text" spellcheck="true" lang="pt-BR" placeholder="Digite aqui o que é falado no trecho…"></textarea>
+            <div class="actions" style="margin-top:.5rem">
+              <button class="btn primary" id="g-save">Salvar gabarito</button>
+              <span class="meta" id="g-words"></span><span id="g-msg" class="meta"></span>
+            </div>
+            <p id="g-draft" class="warn" hidden>Rascunho não salvo recuperado deste navegador. <button class="btn" id="g-discard">Descartar rascunho</button></p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= Erros ================= -->
+  <section id="err" data-view hidden>
+    <div class="actions" style="margin-bottom:.8rem">
+      <label>Hipótese (vídeo · modelo · condição) <select id="e-src"></select></label>
+    </div>
+    <p class="meta" id="e-empty" hidden>Nenhuma hipótese disponível. Elas são gravadas por <code>run_experiments.py</code> (primeira repetição) para os vídeos que têm gabarito.</p>
+    <div id="e-body" hidden>
+      <div class="stat" id="e-stat"></div>
+      <div class="cols" style="grid-template-columns:minmax(0,2fr) minmax(260px,1fr)">
+        <div>
+          <div class="legend"><span><del style="background:var(--del-bg);color:var(--del-ink)">gabarito</del>→<ins style="background:var(--ins-bg);color:var(--ins-ink)">saída</ins> <b>S</b> substituição</span>
+            <span><del style="background:var(--del-bg);color:var(--del-ink)">palavra</del> <b>D</b> remoção</span>
+            <span><ins style="background:var(--ins-bg);color:var(--ins-ink)">palavra</ins> <b>I</b> inserção</span></div>
+          <div class="diff" id="e-diff"></div>
+          <p class="meta">Texto normalizado por <code>metrics.norm</code> (o mesmo do WER). <kbd>J</kbd>/<kbd>K</kbd> próximo/anterior · <kbd>N</kbd> próximo sem categoria · <kbd>1</kbd>–<kbd>9</kbd>, <kbd>0</kbd> categoria · <kbd>Del</kbd> limpar</p>
+        </div>
+        <div class="panel" id="e-panel"><p class="meta">Clique num erro para classificá-lo.</p></div>
+      </div>
+      <div class="panel" id="e-orph" hidden></div>
+    </div>
+    <div class="panel"><h2>Erros classificados por modelo</h2>
+      <p class="meta" style="margin-top:-.3rem">Gravados em <code>results/erros.csv</code>; o <code>report.py</code> gera a tabela 5 a partir dele. Contagem de trechos classificados, não uma taxa.</p>
+      <div class="tablewrap" id="e-sum"></div></div>
+  </section>
+
+  <!-- ================= A/B ================= -->
+  <section id="ab" data-view hidden>
+    <div class="actions" style="margin-bottom:.8rem">
+      <label>Vídeo <select id="a-video"></select></label>
+      <label>Modelo <select id="a-model"></select></label>
+      <label>Condição A <select id="a-ca"></select></label>
+      <label>Condição B <select id="a-cb"></select></label>
+      <button class="btn primary" id="a-toggle" title="Tecla A">Alternar A/B na mesma posição</button>
+    </div>
+    <p class="meta" id="a-empty" hidden>Nenhuma hipótese disponível: rode a RQ1 na tela <a href="#exp">Experimentos</a>.</p>
+    <div class="cols" id="a-body"><div class="panel" id="a-A"></div><div class="panel" id="a-B"></div></div>
+    <p class="meta">Para a demo: mostre o mesmo trecho limpo e com ruído de 0 dB. A legenda acompanha o áudio que estiver tocando; clicar numa fala salta para ela. WER e CER vêm do raw.csv.</p>
+  </section>
+</main>
+<script>
+"use strict";
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmtT = (t) => { t = Math.max(0, Math.floor(t)); const m = Math.floor(t / 60), s = t % 60; return `${m}:${String(s).padStart(2, "0")}`; };
+const pct = (v, d = 1) => v == null ? "—" : (v * 100).toFixed(d) + "%";
+const num = (v, d = 3) => v == null ? "—" : Number(v).toFixed(d);
+const ms = (a, f = (v) => pct(v)) => !a || a.mean == null ? "—" : `${f(a.mean)} ± ${f(a.sd)} <span class="meta">(n=${a.n})</span>`;
+const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+                set(k, v) { try { localStorage.setItem(k, v); } catch {} }, del(k) { try { localStorage.removeItem(k); } catch {} } };
+let cfg = null;
+
+async function api(url, opt = {}) {
+  if (opt.json !== undefined) { opt = { ...opt, method: opt.method || "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(opt.json) }; }
+  const r = await fetch(url, opt);
+  if (!r.ok) { let m = r.statusText; try { const d = (await r.json()).detail; m = typeof d === "string" ? d : JSON.stringify(d); } catch {} throw new Error(m); }
+  return r.json();
+}
+
+/* ---------------- navegação por hash ---------------- */
+const loaders = {};
+function route() {
+  const id = (location.hash || "#lib").slice(1);
+  const views = $$("[data-view]"); const v = views.find((s) => s.id === id) ? id : "lib";
+  views.forEach((s) => (s.hidden = s.id !== v));
+  $$("nav a[href^='#']").forEach((a) => { if (a.getAttribute("href") !== "#" + v) a.removeAttribute("aria-current"); else a.setAttribute("aria-current", "page"); });
+  loaders[v]?.();
+}
+window.addEventListener("hashchange", route);
+
+/* ---------------- trabalhos: componente genérico ---------------- */
+const watchers = {};  // container id -> EventSource
+const STEPS = [["stt", "Transcrição"], ["frames", "Slides"], ["summary", "Resumo"], ["web", "Pacote da demo"]];
+const STATUS = { queued: "na fila", running: "rodando", done: "pronto", error: "erro", cancelled: "interrompido" };
+
+function jobProgress(j) {
+  if (j.kind === "pipeline") {
+    const cur = STEPS.findIndex((s) => s[0] === j.stage);
+    return `<div class="steps">${STEPS.map(([id, nome], i) => {
+      if (id === "summary" && !j.params.summary) return "";
+      const st = j.status === "done" || i < cur ? "done" : (i === cur && j.status === "running" ? "active" : "");
+      return `<div class="step ${st}">${nome}</div>`; }).join("")}</div>`;
+  }
+  if (j.kind === "experiment" && j.total)
+    return `<div class="meta" style="margin:.5rem 0 .2rem">${j.done} de ${j.total} ${j.params.mode === "stt" ? "combinações (modelo × vídeo × condição)" : "resumos"}</div>
+            <progress max="${j.total}" value="${j.done}"></progress>`;
+  return j.status === "running" ? `<progress style="margin:.5rem 0"></progress>` : "";
+}
+
+function watch(job, boxId, onEnd) {
+  const box = $("#" + boxId);
+  watchers[boxId]?.close();
+  box.hidden = false;
+  box.innerHTML = `<div class="actions"><h2 style="margin:0">${esc(job.title)}</h2><span class="meta" data-st></span>
+      <button class="btn danger" data-cancel style="margin-left:auto" hidden>Interromper</button></div>
+    <div data-prog></div><pre class="log" data-log></pre><div class="actions" data-end style="margin-top:.6rem" hidden></div>
+    <details style="margin-top:.4rem"><summary class="meta">Comando equivalente</summary><pre>${esc(job.cmd)}</pre></details>`;
+  const log = $("[data-log]", box);
+  $("[data-cancel]", box).onclick = async () => { try { await api(`/api/jobs/${job.id}/cancel`, { method: "POST" }); } catch (e) { alertBox(box, e.message); } };
+  const es = new EventSource(`/api/jobs/${job.id}/events`);
+  watchers[boxId] = es;
+  es.addEventListener("log", (e) => { log.textContent += JSON.parse(e.data) + "\n"; log.scrollTop = log.scrollHeight; });
+  es.addEventListener("state", (e) => {
+    const j = JSON.parse(e.data);
+    $("[data-st]", box).textContent = STATUS[j.status];
+    $("[data-st]", box).className = j.status === "error" ? "err" : j.status === "done" ? "ok" : "meta";
+    $("[data-prog]", box).innerHTML = jobProgress(j);
+    $("[data-cancel]", box).hidden = !(j.cancellable && (j.status === "queued" || j.status === "running"));
+    if (["done", "error", "cancelled"].includes(j.status)) {
+      es.close(); refreshQueue();
+      const end = $("[data-end]", box); end.hidden = false;
+      end.innerHTML = j.status === "error" ? `<span class="err">${esc(j.error)}</span>` : "";
+      onEnd?.(j, end);
+    }
+  });
+}
+function alertBox(box, msg) { const p = document.createElement("p"); p.className = "err"; p.textContent = msg; box.append(p); }
+
+async function refreshQueue() {
+  const js = await api("/api/jobs");
+  const ativos = js.filter((j) => j.status === "running" || j.status === "queued");
+  $("#qbadge").innerHTML = ativos.length ? `<a href="#run">${ativos.length} trabalho(s) na fila</a>` : "";
+  $("#jobs").innerHTML = js.length ? js.map((j) => `<button class="li" data-job="${j.id}"><strong>${esc(j.title)}</strong>
+      <span class="s ${j.status === "error" ? "err" : ""}">${STATUS[j.status]}${j.kind === "experiment" && j.total ? ` · ${j.done}/${j.total}` : ""}</span></button>`).join("")
+    : `<p class="meta">Nenhum trabalho nesta sessão do servidor.</p>`;
+}
+$("#jobs").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-job]"); if (!b) return;
+  watch(await api(`/api/jobs/${b.dataset.job}`), "runjob", pipelineEnd);
+});
+
+/* ================= Vídeos ================= */
+loaders.lib = async () => {
+  const vids = await api("/api/videos");
+  $("#libcount").textContent = `(${vids.length})`;
+  $("#cards").innerHTML = vids.length ? vids.map((v) => `
+    <div class="card">
+      <div class="thumb" style="${v.thumb ? `background-image:url('${esc(v.thumb)}')` : ""}">${v.thumb ? "" : "sem slides"}</div>
+      <div class="body">
+        <h3>${esc(v.file)}</h3>
+        <div class="meta">${v.size_mb} MB · ${v.license ? esc(v.license) : '<span class="err">sem licença anotada</span>'}</div>
+        <div class="badges">
+          <span class="b ${v.status.stt ? "on" : ""}">STT</span><span class="b ${v.status.slides ? "on" : ""}">Slides</span>
+          <span class="b" title="Etapa 3: o OCR ainda não existe">OCR ⏳</span><span class="b ${v.status.summary ? "on" : ""}">Resumo</span>
+          <span class="b ${v.clip ? "on" : ""}">Trecho</span><span class="b ${v.gt ? "on" : ""}">Gabarito</span></div>
+        <div class="actions">
+          ${v.viewer ? `<a class="btn" href="${esc(v.viewer)}" target="_blank" rel="noopener">Abrir ↗</a>` : ""}
+          <a class="btn" href="#gt" data-gt="${esc(v.id)}">Gabarito</a>
+          <button class="btn primary" data-proc="${esc(v.file)}">Processar</button></div>
+      </div></div>`).join("") : `<p class="meta">Nenhum vídeo em data/raw/. Envie um acima.</p>`;
+};
+$("#cards").addEventListener("click", (e) => {
+  const f = e.target.dataset.proc;
+  if (f) { location.hash = "#run"; setTimeout(() => { $("#f-video").value = f; updateRunForm(); }, 50); }
+  if (e.target.dataset.gt) store.set("falai.gt.sel", e.target.dataset.gt);
+});
+
+const drop = $("#drop"); let pending = null;
+function pick(file) {
+  if (!file) return;
+  pending = file; $("#upname").textContent = `${file.name} (${(file.size / 1e6).toFixed(1)} MB)`;
+  $("#upform").hidden = false; $("#uperr").textContent = ""; $("#license").focus();
+}
+drop.addEventListener("click", () => $("#file").click());
+drop.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("#file").click(); } });
+$("#file").addEventListener("change", (e) => pick(e.target.files[0]));
+drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("over"); pick(e.dataTransfer.files[0]); });
+$("#upcancel").addEventListener("click", () => { pending = null; $("#upform").hidden = true; $("#file").value = ""; });
+$("#upform").addEventListener("submit", (e) => {
+  e.preventDefault(); if (!pending) return;
+  const fd = new FormData(); fd.append("file", pending); fd.append("license", $("#license").value);
+  const x = new XMLHttpRequest(); x.open("POST", "/api/videos");
+  $("#upprog").hidden = false; $("#upgo").disabled = true; $("#uperr").textContent = "";
+  x.upload.onprogress = (ev) => { $("#upprog").value = ev.loaded / ev.total; };
+  x.onload = () => {
+    $("#upgo").disabled = false; $("#upprog").hidden = true;
+    if (x.status === 200) { $("#upform").hidden = true; $("#license").value = ""; $("#file").value = ""; pending = null; loaders.lib(); fillVideoSelect(); }
+    else { let m = x.statusText; try { m = JSON.parse(x.responseText).detail; } catch {} $("#uperr").textContent = m; }
+  };
+  x.onerror = () => { $("#upgo").disabled = false; $("#uperr").textContent = "falha de rede no envio"; };
+  x.send(fd);
+});
+
+/* ================= Processar ================= */
+function runParams() {
+  return { video: $("#f-video").value, model: $("#f-model").value, device: $("#f-device").value,
+    vocab: $("#f-vocab").value || null, summary: $("#f-summary").value || null,
+    llm_model: $("#f-llm").value.trim() || null, frames_mode: $("#f-frames").value,
+    step_s: $("#f-step").value ? Number($("#f-step").value) : null, confirm_paid: $("#f-paid").checked };
+}
+function updateRunForm() {
+  const p = runParams();
+  let c = `uv run python src/pipeline.py data/raw/${p.video} --model ${p.model} --device ${p.device}`;
+  if (p.vocab) c += ` --vocab ${p.vocab}`;
+  if (p.summary) c += ` --summary ${p.summary}`;
+  if (p.llm_model) c += ` --llm-model ${p.llm_model}`;
+  if (p.frames_mode !== "slides") c += ` --frames-mode ${p.frames_mode}`;
+  if (p.step_s) c += ` --step-s ${p.step_s}`;
+  $("#cmd").textContent = c;
+  $("#paidrow").hidden = p.summary !== "claude";
+  const prob = p.summary && cfg.llm[p.summary].problem;
+  $("#llmwarn").hidden = !prob; $("#llmwarn").textContent = prob ? `${prob}. O resumo será pulado e o resto segue.` : "";
+  $("#f-llm").placeholder = p.summary ? cfg.llm[p.summary].model : "padrão do backend";
+  $("#go").disabled = !p.video || (p.summary === "claude" && !p.confirm_paid);
+}
+$$("#jobform select, #jobform input").forEach((el) => el.addEventListener("input", updateRunForm));
+function pipelineEnd(j, end) {
+  if (j.status !== "done" || !j.summary) return;
+  const s = j.summary, id = j.video.replace(/\.[^.]+$/, "");
+  end.innerHTML = `<a class="btn primary" href="index.html?v=${encodeURIComponent(id)}" target="_blank" rel="noopener">Abrir no visualizador ↗</a>
+    <span class="meta">${s.duration_s.toFixed(0)} s de áudio em ${s.time_s.toFixed(1)} s (RTF ${s.rtf.toFixed(3)}) · ${s.n_segments} segmentos · ${s.n_slides} slides${s.has_summary ? " · com resumo" : ""}</span>`;
+}
+$("#jobform").addEventListener("submit", async (e) => {
+  e.preventDefault(); $("#runerr").textContent = "";
+  try { watch(await api("/api/jobs", { json: runParams() }), "runjob", pipelineEnd); refreshQueue(); }
+  catch (err) { $("#runerr").textContent = err.message; }
+});
+loaders.run = refreshQueue;
+async function fillVideoSelect() {
+  const vids = await api("/api/videos"); const cur = $("#f-video").value;
+  $("#f-video").innerHTML = vids.map((v) => `<option>${esc(v.file)}</option>`).join("");
+  if (cur) $("#f-video").value = cur;
+  updateRunForm();
+}
+
+/* ================= Experimentos ================= */
+const xMode = () => $("input[name=mode]:checked").value;
+function expParams() {
+  const mode = xMode();
+  return { mode, models: $$("#x-models input:checked").map((i) => i.value), conditions: $$("#x-conds input:checked").map((i) => i.value),
+    reps: Number($("#x-reps").value) || null, device: $("#x-device").value, vocab: $("#x-vocab").checked, no_clean: $("#x-noclean").checked,
+    redo: $("#x-redo").checked, backend: $("#x-backend").value, llm_model: $("#x-llm").value.trim() || null, confirm_paid: $("#x-paid").checked };
+}
+let planTimer = null, lastMode = "stt";
+function expChanged() {
+  const mode = xMode();
+  if (mode !== lastMode) { $("#x-reps").value = mode === "stt" ? 3 : 2; lastMode = mode; }
+  $$("#expform [data-mode]").forEach((el) => (el.hidden = el.dataset.mode !== mode));
+  $("#x-paidrow").hidden = mode !== "summaries" || $("#x-backend").value !== "claude";
+  clearTimeout(planTimer); planTimer = setTimeout(loadPlan, 250);
+}
+async function loadPlan() {
+  const p = expParams(), box = $("#plan");
+  let pl;
+  try { pl = await api("/api/experiments/plan", { json: p }); } catch (e) { box.innerHTML = `<p class="err">${esc(e.message)}</p>`; return; }
+  const unidade = pl.mode === "stt" ? "combinações" : "resumos";
+  box.innerHTML = `<h2>Plano</h2>
+    <div class="stat"><div>pendentes<strong>${pl.pending} de ${pl.total}</strong></div>
+      <div>${pl.mode === "stt" ? "transcrições (com aquecimento)" : "chamadas ao LLM"}<strong>${pl.transcriptions}</strong></div>
+      <div>vídeos<strong>${pl.videos.length}</strong></div><div>repetições<strong>${pl.reps}</strong></div></div>
+    <div class="tablewrap"><table><tr><th>Modelo</th><th>${unidade} pendentes</th></tr>
+      ${Object.entries(pl.per_model).map(([m, n]) => `<tr><td>${esc(m)}</td><td>${n}</td></tr>`).join("")}</table></div>
+    <p class="meta">Vídeos: ${pl.videos.map(esc).join(", ") || "nenhum"}${pl.without_gt.length ? ` · sem gabarito (pulados): ${pl.without_gt.map(esc).join(", ")}` : ""}
+      ${pl.mode === "stt" ? ` · condições: ${pl.conditions.map(esc).join(", ")}` : ` · LLM: ${esc(pl.conditions[0])}`}</p>
+    ${pl.problems.map((m) => `<p class="warn">${esc(m)}</p>`).join("")}
+    <p class="note">Use o mesmo dispositivo e o mesmo hardware em todos os experimentos (CLAUDE.md, regra 6). Interromper é seguro: ao rodar de novo, o que já está no raw.csv é pulado.</p>
+    <pre>${esc(pl.cmd)}</pre>
+    <div class="actions" style="margin-top:.6rem"><button class="btn primary" id="x-go" ${pl.pending && pl.videos.length ? "" : "disabled"}>Rodar ${pl.pending} ${unidade}</button><span class="err" id="x-err"></span></div>`;
+  $("#x-go").onclick = async () => {
+    $("#x-err").textContent = "";
+    try { watch(await api("/api/experiments", { json: expParams() }), "expjob", (j, end) => {
+      if (j.status === "done") end.innerHTML += `<a class="btn primary" href="#res">Ver resultados</a>`;
+      if (j.status === "cancelled") end.innerHTML += `<span class="meta">Interrompido. Rode de novo para retomar.</span>`;
+      loadPlan(); }); refreshQueue(); }
+    catch (e) { $("#x-err").textContent = e.message; }
+  };
+}
+$("#expform").addEventListener("input", expChanged);
+loaders.exp = loadPlan;
+
+/* ================= Resultados ================= */
+const SERIES_VARS = ["--s1", "--s2", "--s3", "--s4", "--s5"];
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+function modelColor(m) {  // cor fixa por entidade (modelo base), nunca pela posição na tabela
+  const base = m.replace(/-semfiltro$/, ""); const i = cfg.models.indexOf(base);
+  return css(SERIES_VARS[(i < 0 ? cfg.models.length : i) % SERIES_VARS.length]);
+}
+const COND_LABEL = { limpo: "limpo", snr20: "20 dB", snr10: "10 dB", snr0: "0 dB", limpo_vocab: "limpo + vocab." };
+function sortModels(ms) {
+  const key = (m) => { const i = cfg.models.indexOf(m.replace(/-semfiltro$/, "")); return (i < 0 ? 99 : i) * 2 + (m.endsWith("-semfiltro") ? 1 : 0); };
+  return [...ms].sort((a, b) => key(a) - key(b) || a.localeCompare(b));
+}
+function niceMax(v) {  // topo do eixo = 4 passos "redondos" (1, 2, 2,5 ou 5 × 10^k), para ticks legíveis
+  if (!(v > 0)) return 1;
+  const raw = v / 4, p = 10 ** Math.floor(Math.log10(raw));
+  for (const k of [1, 2, 2.5, 5, 10]) if (k * p >= raw) return 4 * k * p;
+  return 40 * p;
+}
+const svgEl = (w, h) => `<svg viewBox="0 0 ${w} ${h}" role="img">`;
+
+function lineChart(box, xs, series, yLabel) {
+  const W = 620, H = 290, L = 46, R = 92, T = 12, B = 40, pw = W - L - R, ph = H - T - B;
+  const ymax = niceMax(Math.max(...series.flatMap((s) => s.values.filter((v) => v != null))) * 100 * 1.08);
+  const X = (i) => L + (xs.length === 1 ? pw / 2 : (i * pw) / (xs.length - 1)), Y = (v) => T + ph - (v * 100 / ymax) * ph;
+  let g = svgEl(W, H) + `<g class="grid">`;
+  for (let k = 0; k <= 4; k++) { const v = (ymax * k) / 4, y = T + ph - (ph * k) / 4;
+    g += `<line x1="${L}" x2="${L + pw}" y1="${y}" y2="${y}"/><text x="${L - 6}" y="${y + 4}" text-anchor="end">${+v.toFixed(1)}</text>`; }
+  g += `</g>`;
+  xs.forEach((x, i) => (g += `<text x="${X(i)}" y="${T + ph + 18}" text-anchor="middle">${esc(COND_LABEL[x] || x)}</text>`));
+  g += `<text x="${L - 34}" y="${T + ph / 2}" transform="rotate(-90 ${L - 34} ${T + ph / 2})" text-anchor="middle">${esc(yLabel)}</text>`;
+  g += `<line id="guide" x1="0" x2="0" y1="${T}" y2="${T + ph}" stroke="${css("--ink-3")}" stroke-dasharray="3 3" visibility="hidden"/>`;
+  const labels = [];
+  for (const s of series) {
+    const pts = s.values.map((v, i) => (v == null ? null : [X(i), Y(v)]));
+    let d = "", pen = false;
+    pts.forEach((p) => { if (!p) { pen = false; return; } d += (pen ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1); pen = true; });
+    g += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" ${s.dash ? 'stroke-dasharray="6 4"' : ""} stroke-linejoin="round" stroke-linecap="round"/>`;
+    pts.forEach((p) => p && (g += `<circle cx="${p[0]}" cy="${p[1]}" r="4" fill="${s.color}" stroke="${css("--panel")}" stroke-width="2"/>`));
+    const last = pts.map((p, i) => [p, i]).filter(([p]) => p).pop();
+    if (last) labels.push({ x: last[0][0] + 8, y: last[0][1], text: s.name });
+  }
+  labels.sort((a, b) => a.y - b.y);  // separa rótulos diretos sobrepostos
+  for (let i = 1; i < labels.length; i++) if (labels[i].y - labels[i - 1].y < 13) labels[i].y = labels[i - 1].y + 13;
+  labels.forEach((l) => (g += `<text x="${l.x}" y="${l.y + 4}">${esc(l.text)}</text>`));
+  xs.forEach((_, i) => { const w = xs.length === 1 ? pw : pw / (xs.length - 1);
+    g += `<rect data-i="${i}" x="${X(i) - w / 2}" y="${T}" width="${w}" height="${ph}" fill="transparent"/>`; });
+  box.innerHTML = g + `</svg><div class="tip" hidden></div>`;
+  const tip = $(".tip", box), guide = $("#guide", box), svg = $("svg", box);
+  $$("rect[data-i]", box).forEach((r) => {
+    r.addEventListener("mousemove", (ev) => {
+      const i = +r.dataset.i; guide.setAttribute("x1", X(i)); guide.setAttribute("x2", X(i)); guide.setAttribute("visibility", "visible");
+      tip.innerHTML = `<b>${esc(COND_LABEL[xs[i]] || xs[i])}</b><br>` + series.filter((s) => s.values[i] != null)
+        .map((s) => `<span class="sw" style="background:${s.color}"></span>${esc(s.name)}: <b>${pct(s.values[i])}</b> <span class="meta">(n=${s.n[i]})</span>`).join("<br>");
+      tip.hidden = false;
+      const bb = svg.getBoundingClientRect(), px = (X(i) / W) * bb.width;
+      tip.style.left = (px + 12 + tip.offsetWidth > bb.width ? px - tip.offsetWidth - 12 : px + 12) + "px"; tip.style.top = "8px";
+    });
+    r.addEventListener("mouseleave", () => { tip.hidden = true; guide.setAttribute("visibility", "hidden"); });
+  });
+}
+
+function scatterChart(box, pts, yLabel) {
+  const W = 620, H = 290, L = 46, R = 24, T = 12, B = 40, pw = W - L - R, ph = H - T - B;
+  const xmax = Math.max(...pts.map((p) => p.x)) * 1.2 || 1, ymax = niceMax(Math.max(...pts.map((p) => p.y)) * 100 * 1.15);
+  const X = (v) => L + (v / xmax) * pw, Y = (v) => T + ph - (v * 100 / ymax) * ph;
+  let g = svgEl(W, H) + `<g class="grid">`;
+  for (let k = 0; k <= 4; k++) { const v = (ymax * k) / 4, y = T + ph - (ph * k) / 4;
+    g += `<line x1="${L}" x2="${L + pw}" y1="${y}" y2="${y}"/><text x="${L - 6}" y="${y + 4}" text-anchor="end">${+v.toFixed(1)}</text>`; }
+  for (let k = 0; k <= 4; k++) { const v = (xmax * k) / 4, x = L + (pw * k) / 4;
+    g += `<line x1="${x}" x2="${x}" y1="${T}" y2="${T + ph}"/><text x="${x}" y="${T + ph + 16}" text-anchor="middle">${v.toFixed(v < 0.1 ? 3 : 2)}</text>`; }
+  g += `</g><text x="${L + pw / 2}" y="${H - 4}" text-anchor="middle">RTF (tempo de inferência ÷ duração)</text>`;
+  g += `<text x="${L - 34}" y="${T + ph / 2}" transform="rotate(-90 ${L - 34} ${T + ph / 2})" text-anchor="middle">${esc(yLabel)}</text>`;
+  const col = css("--s1");
+  pts.forEach((p, i) => {
+    g += `<circle cx="${X(p.x)}" cy="${Y(p.y)}" r="5" fill="${col}" stroke="${css("--panel")}" stroke-width="2"/>`;
+    g += `<text x="${X(p.x) + 8}" y="${Y(p.y) - 6}">${esc(p.name)}</text>`;
+    g += `<circle data-i="${i}" cx="${X(p.x)}" cy="${Y(p.y)}" r="14" fill="transparent"/>`;
+  });
+  box.innerHTML = g + `</svg><div class="tip" hidden></div>`;
+  const tip = $(".tip", box), svg = $("svg", box);
+  $$("circle[data-i]", box).forEach((c) => {
+    c.addEventListener("mouseenter", () => {
+      const p = pts[+c.dataset.i], bb = svg.getBoundingClientRect();
+      tip.innerHTML = `<b>${esc(p.name)}</b><br>erro: <b>${pct(p.y)}</b><br>RTF: <b>${num(p.x)}</b> <span class="meta">(n=${p.n})</span>`;
+      tip.hidden = false;
+      const px = (X(p.x) / W) * bb.width, py = (Y(p.y) / H) * bb.height;
+      tip.style.left = (px + 14 + tip.offsetWidth > bb.width ? px - tip.offsetWidth - 14 : px + 14) + "px"; tip.style.top = Math.max(0, py - 20) + "px";
+    });
+    c.addEventListener("mouseleave", () => (tip.hidden = true));
+  });
+}
+
+let resData = null;
+async function loadResults() {
+  const v = $("#r-video").value;
+  resData = await api("/api/results" + (v ? `?video=${encodeURIComponent(v)}` : ""));
+  const cur = $("#r-video").value;
+  $("#r-video").innerHTML = `<option value="">todos</option>` + resData.videos.map((x) => `<option>${esc(x)}</option>`).join("");
+  $("#r-video").value = cur;
+  $("#r-empty").hidden = resData.exists; $("#r-body").hidden = !resData.exists;
+  renderFigs();
+  if (resData.exists) renderResults();
+}
+function renderResults() {
+  const met = $("#r-metric").value, M = met.toUpperCase(), d = resData;
+  const rows = d.stt.filter((r) => r[met]);
+  const models = sortModels([...new Set(rows.map((r) => r.modelo))]);
+  const condsAll = d.conditions_order.filter((c) => rows.some((r) => r.condicao === c));
+  const condsNoise = condsAll.filter((c) => c !== "limpo_vocab");
+  const get = (m, c) => rows.find((r) => r.modelo === m && r.condicao === c);
+  $("#c1-title").textContent = `Robustez ao ruído: ${M} × SNR`;
+  $("#t1-title").textContent = `${M} por modelo e condição`;
+  // gráfico 1: linhas por modelo (sem-filtro tracejado)
+  if (condsNoise.length >= 2 && models.length) {
+    const series = models.map((m) => ({ name: m, color: modelColor(m), dash: m.endsWith("-semfiltro"),
+      values: condsNoise.map((c) => get(m, c)?.[met].mean ?? null), n: condsNoise.map((c) => get(m, c)?.[met].n ?? 0) }));
+    $("#c1-legend").innerHTML = series.length > 1 ? series.map((s) => `<span><i class="${s.dash ? "dash" : ""}" style="border-color:${s.color}"></i>${esc(s.name)}</span>`).join("") : "";
+    lineChart($("#c1"), condsNoise, series, `${M} médio (%)`);
+  } else { $("#c1-legend").innerHTML = ""; $("#c1").innerHTML = `<p class="meta">Precisa de pelo menos duas condições de ruído no raw.csv.</p>`; }
+  // gráfico 2: RTF × erro no áudio limpo
+  const pts = models.map((m) => get(m, "limpo")).filter((r) => r && r.rtf.mean != null)
+    .map((r) => ({ name: r.modelo, x: r.rtf.mean, y: r[met].mean, n: r[met].n }));
+  pts.length ? scatterChart($("#c2"), pts, `${M} médio, áudio limpo (%)`) : ($("#c2").innerHTML = `<p class="meta">Sem execuções no áudio limpo.</p>`);
+  // tabela 1
+  $("#t1").innerHTML = `<table><tr><th>Modelo</th>${condsAll.map((c) => `<th>${esc(COND_LABEL[c] || c)}</th>`).join("")}</tr>` +
+    models.map((m) => `<tr><td><span class="sw" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${modelColor(m)};margin-right:.4rem"></span>${esc(m)}</td>` +
+      condsAll.map((c) => `<td>${ms(get(m, c)?.[met])}</td>`).join("") + `</tr>`).join("") + `</table>`;
+  // tabela 2: tempo (linhas de WER, todas as condições), carga do modelo
+  const tempo = models.map((m) => {
+    const rs = d.stt.filter((r) => r.modelo === m);
+    const n = rs.reduce((a, r) => a + r.rtf.n, 0);
+    const mean = n ? rs.reduce((a, r) => a + r.rtf.mean * r.rtf.n, 0) / n : null;
+    const load = d.load.find((l) => l.modelo === m);
+    return `<tr><td>${esc(m)}</td><td>${num(mean)} <span class="meta">(n=${n})</span></td><td>${load ? ms(load.tempo_s, (v) => num(v, 2) + " s") : "—"}</td></tr>`;
+  }).join("");
+  $("#t2").innerHTML = `<table><tr><th>Modelo</th><th>RTF médio (todas as condições)</th><th>Carga do modelo</th></tr>${tempo}</table>
+    <p class="meta">Detalhe por condição na tabela 3 do report.py. Só a inferência entra no RTF; a carga é medida à parte.</p>`;
+  // tabela 3: termos
+  const ter = d.stt.filter((r) => r.acerto_termos && ["limpo", "limpo_vocab"].includes(r.condicao));
+  $("#t3wrap").hidden = !ter.length;
+  if (ter.length) {
+    const tm = sortModels([...new Set(ter.map((r) => r.modelo))]);
+    const g2 = (m, c) => ter.find((r) => r.modelo === m && r.condicao === c)?.acerto_termos;
+    $("#t3").innerHTML = `<table><tr><th>Modelo</th><th>sem vocabulário</th><th>com vocabulário</th></tr>` +
+      tm.map((m) => `<tr><td>${esc(m)}</td><td>${ms(g2(m, "limpo"))}</td><td>${ms(g2(m, "limpo_vocab"))}</td></tr>`).join("") + `</table>`;
+  }
+  // tabela 4: resumos
+  $("#t4wrap").hidden = !d.summary.length;
+  if (d.summary.length) {
+    const mets = [...new Set(d.summary.map((r) => r.metrica))];
+    const keys = [...new Set(d.summary.map((r) => r.modelo + "\u0000" + r.condicao))];
+    const fm = (r) => !r || r.mean == null ? "—" : r.metrica === "tempo_llm" ? ms(r, (v) => num(v, 1) + " s") : r.metrica === "custo_usd" ? ms(r, (v) => "US$ " + num(v, 4)) : ms(r, (v) => num(v, 2));
+    $("#t4").innerHTML = `<table><tr><th>STT / LLM</th>${mets.map((m) => `<th>${esc(m)}</th>`).join("")}</tr>` + keys.map((k) => {
+      const [m, c] = k.split("\u0000");
+      return `<tr><td>${esc(m)} / ${esc(c)}</td>${mets.map((x) => `<td>${fm(d.summary.find((r) => r.modelo === m && r.condicao === c && r.metrica === x))}</td>`).join("")}</tr>`; }).join("") + `</table>`;
+  }
+  // hardware
+  const h = d.hardware;
+  $("#hw").innerHTML = h ? `${esc(h.cpu)} · ${h.threads} threads · ${h.ram_gb} GB RAM · ${h.gpus_cuda} GPU CUDA<br>${esc(h.os)} · Python ${esc(h.python)}<br><span>Vai para o artigo (regra 6).</span>`
+    : "Ainda não registrado (run_experiments.py grava results/hardware.json).";
+}
+function renderFigs() {
+  const d = resData;
+  $("#figs").innerHTML = d.figures.length ? d.figures.map((f) => `<figure><a href="/api/results/figure/${encodeURIComponent(f)}" target="_blank" rel="noopener">
+      <img loading="lazy" src="/api/results/figure/${encodeURIComponent(f)}?t=${Date.now()}" alt="${esc(f)}"></a><figcaption>${esc(f)}</figcaption></figure>`).join("")
+    : `<p class="meta">Nenhuma figura gerada ainda.</p>`;
+  $("#tabs").innerHTML = d.tables.map((t) => `<button class="btn" data-tab="${esc(t)}">${esc(t)}</button>`).join("") || `<span class="meta">Nenhuma tabela gerada ainda.</span>`;
+}
+$("#tabs").addEventListener("click", async (e) => {
+  const t = e.target.dataset.tab; if (!t) return;
+  const r = await api(`/api/results/table/${encodeURIComponent(t)}`); $("#tabview").hidden = false; $("#tabview").textContent = r.markdown;
+});
+$("#r-video").addEventListener("change", loadResults);
+$("#r-metric").addEventListener("change", () => resData?.exists && renderResults());
+$("#r-reload").addEventListener("click", loadResults);
+$("#r-report").addEventListener("click", async () => {
+  try { watch(await api("/api/report", { method: "POST" }), "repjob", () => loadResults()); refreshQueue(); }
+  catch (e) { alertBox($("#res .actions"), e.message); }
+});
+loaders.res = loadResults;
+
+/* ================= Gabarito ================= */
+let gtSel = null, gtSaved = "";
+async function loadGtList() {
+  const list = await api("/api/gt");
+  $("#g-list").innerHTML = list.length ? list.map((g) => `<button class="li" data-v="${esc(g.video)}" aria-current="${g.video === gtSel}">
+      <span><strong>${esc(g.video)}</strong><br><span class="meta">${g.clip ? `trecho ${fmtT(g.clip[0])} + ${g.clip[1]} s` : "sem trecho"}</span></span>
+      <span class="s">${g.has_gt ? `${g.gt_words} palavras` : "sem gabarito"}</span></button>`).join("")
+    : `<p class="meta">Nenhum vídeo em data/raw/ nem em clips.csv.</p>`;
+  return list;
+}
+loaders.gt = async () => {
+  const list = await loadGtList();
+  const want = store.get("falai.gt.sel");
+  if (want && list.some((g) => g.video === want)) { store.del("falai.gt.sel"); openGt(want, list); }
+  else if (gtSel) openGt(gtSel, list);
+  else if (list.length) openGt(list[0].video, list);
+};
+$("#g-list").addEventListener("click", async (e) => { const b = e.target.closest("[data-v]"); if (b) openGt(b.dataset.v, await loadGtList()); });
+async function openGt(v, list) {
+  if (gtSel && gtSel !== v && $("#g-text").value !== gtSaved) store.set(`falai.gt.draft.${gtSel}`, $("#g-text").value);
+  gtSel = v; const g = list.find((x) => x.video === v);
+  $$("#g-list .li").forEach((b) => b.setAttribute("aria-current", b.dataset.v === v));
+  $("#g-none").hidden = true; $("#g-body").hidden = false; $("#g-name").textContent = `· ${v}`;
+  $("#g-video").src = g.file ? `/api/raw/${encodeURIComponent(g.file)}` : "";
+  $("#g-start").value = g.clip ? g.clip[0] : ""; $("#g-dur").value = g.clip ? g.clip[1] : 150;
+  $("#g-clipmsg").innerHTML = g.file ? "" : `<span class="warn">O vídeo não está em data/raw/.</span>`;
+  setGtAudio(g);
+  const t = await api(`/api/gt/${encodeURIComponent(v)}/text`);
+  gtSaved = t.text.trim();
+  const draft = store.get(`falai.gt.draft.${v}`);
+  $("#g-draft").hidden = !(draft != null && draft.trim() !== gtSaved);
+  $("#g-text").value = !$("#g-draft").hidden ? draft : t.text.trim();
+  $("#g-msg").textContent = ""; countWords();
+}
+function setGtAudio(g) {
+  $("#g-noaudio").hidden = g.clip_audio || !g.clip;
+  $("#g-audio").hidden = !g.clip_audio;
+  $("#g-audio").src = g.clip_audio ? `/api/media/${encodeURIComponent(g.video)}/limpo?t=${Date.now()}` : "";
+}
+function countWords() {
+  const n = $("#g-text").value.trim().split(/\s+/).filter(Boolean).length;
+  const dur = Number($("#g-dur").value) || 0;
+  $("#g-words").textContent = `${n} palavras${dur ? ` · ${(n / (dur / 60)).toFixed(0)} por minuto de trecho` : ""}`;
+}
+$("#g-text").addEventListener("input", () => { countWords(); if (gtSel) store.set(`falai.gt.draft.${gtSel}`, $("#g-text").value); });
+$("#g-discard").addEventListener("click", () => { store.del(`falai.gt.draft.${gtSel}`); $("#g-text").value = gtSaved; $("#g-draft").hidden = true; countWords(); });
+$("#g-now").addEventListener("click", () => ($("#g-start").value = $("#g-video").currentTime.toFixed(1)));
+$("#g-preview").addEventListener("click", () => {
+  const v = $("#g-video"), s = Number($("#g-start").value) || 0, d = Number($("#g-dur").value) || 0;
+  v.currentTime = s; v.play();
+  const stop = () => { if (v.currentTime >= s + d) { v.pause(); v.removeEventListener("timeupdate", stop); } };
+  v.addEventListener("timeupdate", stop);
+});
+$("#g-saveclip").addEventListener("click", async () => {
+  try {
+    const r = await api(`/api/gt/${encodeURIComponent(gtSel)}/clip`, { method: "PUT", json: { start_s: Number($("#g-start").value), dur_s: Number($("#g-dur").value) } });
+    $("#g-clipmsg").innerHTML = `<span class="ok">Trecho salvo em data/gt/clips.csv.</span>` + r.warnings.map((w) => `<br><span class="warn">${esc(w)}</span>`).join("");
+    const list = await loadGtList(); setGtAudio(list.find((x) => x.video === gtSel));
+  } catch (e) { $("#g-clipmsg").innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+});
+$("#g-mkaudio").addEventListener("click", async (e) => {
+  e.target.disabled = true; e.target.textContent = "Gerando…";
+  try { await api(`/api/gt/${encodeURIComponent(gtSel)}/clip-audio`, { method: "POST" }); setGtAudio((await loadGtList()).find((x) => x.video === gtSel)); }
+  catch (err) { $("#g-clipmsg").innerHTML = `<span class="err">${esc(err.message)}</span>`; }
+  e.target.disabled = false; e.target.textContent = "Gerar áudio do trecho";
+});
+async function saveGt() {
+  try {
+    const r = await api(`/api/gt/${encodeURIComponent(gtSel)}/text`, { method: "PUT", json: { text: $("#g-text").value } });
+    gtSaved = $("#g-text").value.trim(); store.del(`falai.gt.draft.${gtSel}`); $("#g-draft").hidden = true;
+    $("#g-msg").innerHTML = `<span class="ok">Salvo em data/gt/${esc(gtSel)}.stt.txt (${r.words} palavras).</span>` + r.warnings.map((w) => ` <span class="warn">${esc(w)}</span>`).join("");
+    loadGtList();
+  } catch (e) { $("#g-msg").innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+}
+$("#g-save").addEventListener("click", saveGt);
+$("#g-rate").addEventListener("change", (e) => ($("#g-audio").playbackRate = Number(e.target.value)));
+document.addEventListener("keydown", (e) => {
+  if ($("#gt").hidden || !gtSel) return;
+  const a = $("#g-audio");
+  if (e.key === "Escape") { e.preventDefault(); a.paused ? a.play() : a.pause(); }
+  else if (e.altKey && e.key === "ArrowLeft") { e.preventDefault(); a.currentTime = Math.max(0, a.currentTime - 3); }
+  else if (e.altKey && e.key === "ArrowRight") { e.preventDefault(); a.currentTime += 3; }
+  else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); saveGt(); }
+});
+window.addEventListener("beforeunload", (e) => { if (gtSel && !$("#gt").hidden && $("#g-text").value.trim() !== gtSaved) e.preventDefault(); });
+
+/* ================= Erros ================= */
+let errSrc = [], errData = null, errCur = -1;
+const OPS = { substitute: "S", delete: "D", insert: "I" };
+async function loadErrSources() {
+  errSrc = await api("/api/errors/sources");
+  const key = (s) => `${s.video}|${s.modelo}|${s.condicao}`, cur = $("#e-src").value;
+  $("#e-src").innerHTML = errSrc.map((s) => `<option value="${esc(key(s))}">${esc(s.video)} · ${esc(s.modelo)} · ${esc(COND_LABEL[s.condicao] || s.condicao)}</option>`).join("");
+  if (cur && errSrc.some((s) => key(s) === cur)) $("#e-src").value = cur;
+  $("#e-empty").hidden = errSrc.length > 0; $("#e-body").hidden = !errSrc.length;
+}
+loaders.err = async () => { await loadErrSources(); if (errSrc.length) loadErr(); loadErrSummary(); };
+$("#e-src").addEventListener("change", loadErr);
+const errUrl = () => "/api/errors/" + $("#e-src").value.split("|").map(encodeURIComponent).join("/");
+async function loadErr() {
+  try { errData = await api(errUrl()); } catch (e) { $("#e-diff").innerHTML = `<p class="err">${esc(e.message)}</p>`; return; }
+  errCur = -1; renderErr(); $("#e-panel").innerHTML = `<p class="meta">Clique num erro (ou tecle <kbd>N</kbd>) para classificá-lo.</p>`;
+}
+function renderErr() {
+  const d = errData, erros = d.chunks.filter((c) => c.op !== "equal"), feitos = erros.filter((c) => c.label).length;
+  $("#e-stat").innerHTML = `<div>WER no raw.csv<strong>${d.raw ? pct(d.raw.mean) : "—"}</strong>${d.raw ? `média de ${d.raw.n} repetição(ões)` : "sem linha no raw.csv"}</div>
+    <div>substituições<strong>${d.counts.substitute}</strong></div><div>remoções<strong>${d.counts.delete}</strong></div>
+    <div>inserções<strong>${d.counts.insert}</strong></div><div>palavras no gabarito<strong>${d.ref_words}</strong></div>
+    <div>classificados<strong>${feitos} de ${erros.length}</strong></div>`;
+  $("#e-diff").innerHTML = d.chunks.map((c, i) => {
+    if (c.op === "equal") return esc(c.ref.join(" "));
+    const body = c.op === "substitute" ? `<del>${esc(c.ref.join(" "))}</del>→<ins>${esc(c.hyp.join(" "))}</ins>`
+      : c.op === "delete" ? `<del>${esc(c.ref.join(" "))}</del>` : `<ins>${esc(c.hyp.join(" "))}</ins>`;
+    return `<button class="e ${i === errCur ? "cur" : ""}" data-i="${i}">${body}<sup>${OPS[c.op]}</sup>${c.label ? `<span class="cat">✔ ${esc(cfg.categories[c.label.categoria] || c.label.categoria)}</span>` : ""}</button>`;
+  }).join(" ");
+  $("#e-orph").hidden = !d.orphans.length;
+  $("#e-orph").innerHTML = `<h2>Classificações desatualizadas</h2><p class="meta">O gabarito ou a hipótese mudou e estes trechos não batem mais com o alinhamento atual. Continuam no erros.csv até serem refeitos.</p>
+    <div class="tablewrap"><table><tr><th>Trecho</th><th>Tipo</th><th>Gabarito</th><th>Saída</th><th>Categoria</th></tr>${d.orphans.map((o) => `<tr><td>${esc(o.idx)}</td><td>${esc(o.tipo)}</td><td>${esc(o.ref)}</td><td>${esc(o.hyp)}</td><td>${esc(o.categoria)}</td></tr>`).join("")}</table></div>`;
+}
+function selectErr(i) {
+  errCur = i; renderErr();
+  const c = errData.chunks[i], el = $(`#e-diff [data-i="${i}"]`);
+  el?.scrollIntoView({ block: "nearest" });
+  const ctx = (a, b) => errData.chunks.slice(a, b).map((x) => (x.op === "insert" ? [] : x.ref)).flat().join(" ");
+  const keys = Object.keys(cfg.categories);
+  $("#e-panel").innerHTML = `<h2>${{ substitute: "Substituição", delete: "Remoção", insert: "Inserção" }[c.op]} <span class="meta">trecho ${i}</span></h2>
+    <p><span class="meta">gabarito:</span> <strong>${esc(c.ref.join(" ") || "∅")}</strong><br><span class="meta">saída:</span> <strong>${esc(c.hyp.join(" ") || "∅")}</strong></p>
+    <p class="meta">…${esc(ctx(Math.max(0, i - 3), i))} <b>[${esc(c.ref.join(" ") || "∅")}]</b> ${esc(ctx(i + 1, i + 4))}…</p>
+    <div class="cats">${keys.map((k, n) => `<button class="btn" data-cat="${k}" aria-pressed="${c.label?.categoria === k}"><kbd>${(n + 1) % 10}</kbd> ${esc(cfg.categories[k])}</button>`).join("")}</div>
+    <label>Nota (opcional) <input type="text" id="e-note" maxlength="300" value="${esc(c.label?.nota || "")}"></label>
+    <div class="actions" style="margin-top:.5rem"><button class="btn" data-cat="">Limpar</button><button class="btn" id="e-next">Próximo sem categoria</button></div>`;
+  $$("[data-cat]", $("#e-panel")).forEach((b) => (b.onclick = () => setCat(b.dataset.cat)));
+  $("#e-next").onclick = nextUnlabeled;
+}
+async function setCat(cat) {
+  if (errCur < 0) return;
+  const nota = $("#e-note")?.value || "";
+  try {
+    await api(`${errUrl()}/${errCur}`, { method: "PUT", json: { categoria: cat || null, nota } });
+    errData.chunks[errCur].label = cat ? { categoria: cat, nota } : undefined;
+    if (!cat) delete errData.chunks[errCur].label;
+    selectErr(errCur); loadErrSummary();
+  } catch (e) { alertBox($("#e-panel"), e.message); }
+}
+function stepErr(dir) {
+  const idx = errData.chunks.map((c, i) => (c.op !== "equal" ? i : -1)).filter((i) => i >= 0);
+  if (!idx.length) return;
+  const pos = idx.indexOf(errCur);
+  selectErr(idx[pos < 0 ? (dir > 0 ? 0 : idx.length - 1) : (pos + dir + idx.length) % idx.length]);
+}
+function nextUnlabeled() {
+  const idx = errData.chunks.map((c, i) => (c.op !== "equal" && !c.label ? i : -1)).filter((i) => i >= 0);
+  if (!idx.length) { $("#e-panel").insertAdjacentHTML("beforeend", `<p class="ok">Todos os erros deste trecho estão classificados.</p>`); return; }
+  selectErr(idx.find((i) => i > errCur) ?? idx[0]);
+}
+$("#e-diff").addEventListener("click", (e) => { const b = e.target.closest("[data-i]"); if (b) selectErr(+b.dataset.i); });
+document.addEventListener("keydown", (e) => {
+  if ($("#err").hidden || !errData || e.target.matches("input, textarea, select") || e.ctrlKey || e.metaKey || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if (k === "j") stepErr(1); else if (k === "k") stepErr(-1); else if (k === "n") nextUnlabeled();
+  else if (/^[0-9]$/.test(k) && errCur >= 0) { const keys = Object.keys(cfg.categories), n = (Number(k) + 9) % 10; if (keys[n]) setCat(keys[n]); }
+  else if ((e.key === "Delete" || e.key === "Backspace") && errCur >= 0) setCat("");
+  else return;
+  e.preventDefault();
+});
+async function loadErrSummary() {
+  const s = await api("/api/errors/summary");
+  const cats = Object.keys(cfg.categories).filter((c) => Object.values(s.by_model).some((m) => m[c]));
+  const models = sortModels(Object.keys(s.by_model));
+  $("#e-sum").innerHTML = s.total ? `<table><tr><th>Modelo</th>${cats.map((c) => `<th>${esc(cfg.categories[c])}</th>`).join("")}<th>total</th></tr>` +
+    models.map((m) => `<tr><td>${esc(m)}</td>${cats.map((c) => `<td>${s.by_model[m][c] || 0}</td>`).join("")}<td><strong>${Object.values(s.by_model[m]).reduce((a, b) => a + b, 0)}</strong></td></tr>`).join("") + `</table>`
+    : `<p class="meta">Nenhum erro classificado ainda.</p>`;
+}
+
+/* ================= A/B ================= */
+let abSrc = [], abActive = "A";
+loaders.ab = async () => {
+  abSrc = await api("/api/errors/sources");
+  $("#a-empty").hidden = abSrc.length > 0; $("#a-body").hidden = !abSrc.length; $("#a-toggle").disabled = !abSrc.length;
+  if (!abSrc.length) return;
+  const vids = [...new Set(abSrc.map((s) => s.video))], cur = $("#a-video").value;
+  $("#a-video").innerHTML = vids.map((v) => `<option>${esc(v)}</option>`).join("");
+  if (vids.includes(cur)) $("#a-video").value = cur;
+  abModels();
+};
+function abModels() {
+  const v = $("#a-video").value, ms_ = sortModels([...new Set(abSrc.filter((s) => s.video === v).map((s) => s.modelo))]), cur = $("#a-model").value;
+  $("#a-model").innerHTML = ms_.map((m) => `<option>${esc(m)}</option>`).join("");
+  if (ms_.includes(cur)) $("#a-model").value = cur;
+  abConds();
+}
+function abConds() {
+  const v = $("#a-video").value, m = $("#a-model").value;
+  const cs = cfg.conditions.concat("limpo_vocab").filter((c) => abSrc.some((s) => s.video === v && s.modelo === m && s.condicao === c));
+  const opts = cs.map((c) => `<option value="${c}">${esc(COND_LABEL[c] || c)}</option>`).join("");
+  const a = $("#a-ca").value, b = $("#a-cb").value;
+  $("#a-ca").innerHTML = opts; $("#a-cb").innerHTML = opts;
+  $("#a-ca").value = cs.includes(a) ? a : cs.includes("limpo") ? "limpo" : cs[0];
+  $("#a-cb").value = cs.includes(b) ? b : cs.includes("snr0") ? "snr0" : cs[cs.length - 1];
+  abLoad();
+}
+async function abLoad() {
+  const v = $("#a-video").value, m = $("#a-model").value;
+  for (const side of ["A", "B"]) {
+    const c = $(side === "A" ? "#a-ca" : "#a-cb").value, box = $("#a-" + side);
+    if (!c) { box.innerHTML = ""; continue; }
+    const d = await api(`/api/ab/${encodeURIComponent(v)}/${encodeURIComponent(m)}/${encodeURIComponent(c)}`);
+    box.innerHTML = `<h2>${side}: ${esc(COND_LABEL[c] || c)}</h2>
+      <div class="stat"><div>WER (raw.csv)<strong>${d.wer ? pct(d.wer.mean) : "—"}</strong>${d.wer ? `n=${d.wer.n}` : ""}</div>
+        <div>CER (raw.csv)<strong>${d.cer ? pct(d.cer.mean) : "—"}</strong>${d.cer ? `n=${d.cer.n}` : ""}</div><div>falas<strong>${d.segments.length}</strong></div></div>
+      ${d.audio ? `<audio controls preload="metadata" src="${esc(d.audio)}" data-side="${side}"></audio>` : `<p class="warn">Áudio do trecho não encontrado em data/derived/.</p>`}
+      <div class="segs" style="margin-top:.5rem">${d.segments.map((s) => `<button class="seg" data-s="${s.start}" data-e="${s.end}"><span class="t">${fmtT(s.start)}</span><span>${esc(s.text)}</span></button>`).join("")
+        || `<p class="meta">Nenhuma fala reconhecida.</p>`}</div>`;
+    const au = $("audio", box);
+    if (au) {
+      au.addEventListener("play", () => { abActive = side; const o = $(`#a-${side === "A" ? "B" : "A"} audio`); o?.pause(); markActive(); });
+      au.addEventListener("timeupdate", () => { if (abActive === side) abHighlight(au.currentTime); });
+    }
+    $(".segs", box).addEventListener("click", (e) => { const s = e.target.closest("[data-s]"); if (s && au) { au.currentTime = +s.dataset.s; au.play(); } });
+  }
+  markActive();
+}
+function markActive() { ["A", "B"].forEach((s) => $("#a-" + s).classList.toggle("ab-active", s === abActive)); }
+function abHighlight(t) {
+  for (const side of ["A", "B"]) $$(`#a-${side} .seg`).forEach((el) => {
+    const on = t >= +el.dataset.s && t < +el.dataset.e;
+    if (on && !el.classList.contains("cur")) el.scrollIntoView({ block: "nearest" });
+    el.classList.toggle("cur", on);
+  });
+}
+function abToggle() {
+  const from = $(`#a-${abActive} audio`), to = $(`#a-${abActive === "A" ? "B" : "A"} audio`);
+  if (!to) return;
+  const t = from ? from.currentTime : 0, playing = from && !from.paused;
+  from?.pause(); to.currentTime = t; abActive = abActive === "A" ? "B" : "A"; markActive();
+  if (playing || !from) to.play();
+}
+$("#a-toggle").addEventListener("click", abToggle);
+$("#a-video").addEventListener("change", abModels);
+$("#a-model").addEventListener("change", abConds);
+$("#a-ca").addEventListener("change", abLoad);
+$("#a-cb").addEventListener("change", abLoad);
+document.addEventListener("keydown", (e) => {
+  if ($("#ab").hidden || e.target.matches("input, textarea, select") || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key.toLowerCase() === "a") { e.preventDefault(); abToggle(); }
+});
+
+/* ================= início ================= */
+(async () => {
+  try { cfg = await api("/api/config"); }
+  catch {
+    document.querySelector("main").innerHTML = `<p class="err">Servidor não encontrado. Rode <code>uv run --extra gui python src/studio.py</code> e abra http://127.0.0.1:8000.</p>`;
+    return;
+  }
+  $("#dev").textContent = `dispositivo: ${cfg.resolved_device}`;
+  $("#f-model").innerHTML = cfg.models.map((m) => `<option ${m === "small" ? "selected" : ""}>${m}</option>`).join("");
+  $("#f-device").innerHTML = $("#x-device").innerHTML = cfg.devices.map((d) => `<option>${d}</option>`).join("");
+  $("#f-vocab").innerHTML += cfg.vocab_files.map((v) => `<option>${esc(v)}</option>`).join("");
+  $("#x-models").innerHTML = cfg.models.map((m) => `<label class="check"><input type="checkbox" value="${m}" ${["tiny", "base", "small"].includes(m) ? "checked" : ""}> ${m}</label>`).join("");
+  $("#x-conds").innerHTML = cfg.conditions.map((c) => `<label class="check"><input type="checkbox" value="${c}" checked> ${esc(COND_LABEL[c])}</label>`).join("");
+  if (!cfg.has_terms) { $("#x-vocab").disabled = true; }
+  await fillVideoSelect();
+  expChanged();
+  refreshQueue();
+  route();
+})();
+</script>
+</body>
+</html>

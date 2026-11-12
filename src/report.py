@@ -70,8 +70,8 @@ def _mean_sd(s: pd.Series, fmt: str = "{:.3f}") -> str:
     return f"{fmt.format(s.mean())} ± {fmt.format(s.std(ddof=1) if len(s) > 1 else 0)} (n={len(s)})"
 
 
-def load() -> pd.DataFrame:
-    df = pd.read_csv(RAW_CSV)
+def load(path=RAW_CSV) -> pd.DataFrame:
+    df = pd.read_csv(path)
     chave = ["video", "tarefa", "modelo", "condicao", "repeticao", "metrica_erro"]
     return df.drop_duplicates(subset=chave, keep="last")  # execuções refeitas valem pela última
 
@@ -160,6 +160,20 @@ def fig_vocab(stt: pd.DataFrame) -> None:
     _save_fig(fig, "fig3_termos_vocabulario")
 
 
+# ------------------------------------------------------------------ análise de erros (regra 11)
+def table5_errors() -> None:
+    """Erros classificados à mão no FalAI Studio (results/erros.csv): contagem por modelo × categoria."""
+    arq = RESULTS / "erros.csv"
+    if not arq.exists():
+        return
+    e = pd.read_csv(arq)
+    if e.empty:
+        return
+    t = e.pivot_table(index="modelo", columns="categoria", values="idx", aggfunc="count", fill_value=0)
+    t["total"] = t.sum(axis=1)
+    _save_table(t.reindex(_models(t.index)), "tabela5_erros_classificados")
+
+
 # ------------------------------------------------------------------ F9
 def summaries(df: pd.DataFrame) -> None:
     r = df[df.tarefa == "resumo"]
@@ -215,6 +229,7 @@ def main():
     fig2_rtf_wer(stt_df)
     fig_vocab(stt_df)
     summaries(df)
+    table5_errors()
 
 
 if __name__ == "__main__":

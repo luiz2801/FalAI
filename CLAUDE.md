@@ -201,7 +201,8 @@ tema9/
 │   ├── eval_summaries.py      # F9
 │   ├── pipeline.py            # um vídeo de ponta a ponta + demo
 │   ├── run_experiments.py
-│   └── report.py
+│   ├── report.py
+│   └── studio.py              # FalAI Studio: GUI de trabalho (guia.md, 4.10)
 ├── tests/                     # testes de fumaça e unitários
 ├── data/
 │   ├── raw/                   # vídeos originais (fora do git)
@@ -209,7 +210,7 @@ tema9/
 │   │                          # clips.csv (trecho de cada vídeo) e terms.txt (vocabulário)
 │   └── derived/               # áudio, ruído, frames, .vtt, .json (regenerável, fora do git)
 ├── results/                   # raw.csv, tabelas e figuras geradas
-├── web/                       # index.html; web/data/ (gerado, fora do git) com as cópias para a demo
+├── web/                       # index.html (visualizador), studio.html (GUI); web/data/ (gerado, fora do git) com as cópias para a demo
 ├── artigo/                    # esqueleto; [PENDENTE] modelo SBC
 └── docs/
     └── decisoes.md            # mudanças de plano, com motivo

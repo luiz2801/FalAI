@@ -18,6 +18,11 @@ dependencies = [
 llm = [
     "anthropic==2.8.0",
 ]
+gui = [
+    "fastapi==0.162.5",
+    "python-multipart==0.0.33",
+    "uvicorn==0.54.0",
+]
 
 [dependency-groups]
 dev = [

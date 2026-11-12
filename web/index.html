@@ -55,6 +55,7 @@
 <body>
 <header>
   <h1>FalAI — análise de vídeo de aula</h1>
+  <a href="studio.html" id="studio">← Studio</a>
   <label>Vídeo <select id="sel"></select></label>
   <input id="q" type="search" placeholder="Buscar na fala e nos slides…" aria-label="Buscar">
 </header>
@@ -180,7 +181,9 @@ $("#sel").addEventListener("change", (e) => load(e.target.value));
   try {
     const ids = await getJSON("data/videos.json");
     $("#sel").innerHTML = ids.map((i) => `<option>${esc(i)}</option>`).join("");
-    if (ids.length) await load(ids[0]);
+    const want = new URLSearchParams(location.search).get("v");  // ?v=<id>, usado pelo FalAI Studio
+    if (want && ids.includes(want)) $("#sel").value = want;
+    if (ids.length) await load($("#sel").value);
   } catch {
     document.querySelector("main").innerHTML = `<p class="empty">Nenhum vídeo processado. Rode
       <code>python src/pipeline.py data/raw/&lt;video&gt;.mp4</code> e sirva com

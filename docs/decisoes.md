@@ -84,3 +84,11 @@ passava como slide (camisa azul em fundo escuro: só 29% de tinta). Correção D
 
 Ressalva: as 12 aulas têm o mesmo visual e o mesmo professor; ajustar limiares nelas não prova que
 generalizam. O gabarito de tempo continua pendente.
+
+**FalAI Studio (2026-11-12).** GUI de trabalho (guia.md, 4.10), pedida pelo usuário: FastAPI + HTML/JS, sem build,
+reaproveitando o visualizador. Não muda nenhum número: lê o `raw.csv` e roda os mesmos scripts do CLI.
+
+| # | Decisão | Status |
+|---|---|---|
+| D12 | Categorias da análise de erros (regra 11), gravadas em `results/erros.csv`: `nome_proprio`, `sigla`, `numero`, `termo_tecnico`, `sotaque`, `ruido`, `hesitacao`, `normalizacao`, `alucinacao`, `outro`. As cinco do CLAUDE.md mais termo técnico (liga com a I5), hesitação (fala espontânea), normalização (grafia que o `norm` não iguala, como "u f p a" × "ufpa"), alucinação (texto sem fala correspondente) e outro | `[PREMISSA]` revisar com a equipe antes de classificar |
+| D13 | Classifica-se o **trecho** do alinhamento (sequência contígua de substituições, remoções ou inserções), não a palavra: um trecho = uma marcação. A tabela 5 conta trechos, não é uma taxa | `[PREMISSA]` |

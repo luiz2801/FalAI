@@ -62,6 +62,9 @@ HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm pipeline bash   # sh
 uv run python src/pipeline.py data/raw/aula01.mp4 --model small
 uv run python src/pipeline.py data/raw/aula01.mp4 --model small --summary ollama   # + resumo e tópicos
 cd web && python -m http.server     # abrir http://localhost:8000
+
+# Ou a GUI (FalAI Studio): vídeos, processamento, experimentos, resultados, gabarito, erros e A/B
+uv run --extra gui python src/studio.py    # abrir http://127.0.0.1:8000
 ```
 
 A página tem player com legenda, abas de tópicos, slides, transcrição e resumo, e busca na fala e nos slides. Clicar em qualquer item leva ao instante do vídeo. Sem LLM disponível, o resumo é pulado e o resto segue.
