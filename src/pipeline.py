@@ -16,15 +16,15 @@ import shutil
 from pathlib import Path
 
 import stt
-from extract import keyframes
+from extract import keyframes, slides as extract_slides
 
 ROOT = Path(__file__).resolve().parent.parent
 DERIVED, WEB = ROOT / "data" / "derived", ROOT / "web"
 
 
 def process(video: str | Path, model: str = "small", device: str = "auto", vocab: str | None = None,
-            summary: str | None = None, llm_model: str | None = None, step_s: float = 1.0,
-            thr: float = 0.04, web: bool = True, progress=print) -> dict:
+            summary: str | None = None, llm_model: str | None = None, step_s: float | None = None,
+            thr: float = 0.04, web: bool = True, progress=print, frames_mode: str = "slides") -> dict:
     video = Path(video)
     v = video.stem
     pasta = DERIVED / v
@@ -40,10 +40,15 @@ def process(video: str | Path, model: str = "small", device: str = "auto", vocab
     out.update(segments=segs, duration_s=dur, time_s=tempo)
     progress(f"  {dur:.0f} s de áudio em {tempo:.1f} s (RTF {tempo / dur:.3f}), {len(segs)} segmentos")
 
-    progress("Keyframes...")
     frames_dir = pasta / "frames"
-    out["frames"] = keyframes(video, frames_dir, step_s, thr)
-    progress(f"  {len(out['frames'])} keyframes")
+    if frames_mode == "slides":  # padrão: um quadro completo por slide (extract.slides)
+        progress("Slides completos...")
+        out["frames"] = extract_slides(video, frames_dir, step_s or 0.5)
+        progress(f"  {len(out['frames'])} slides")
+    else:  # baseline: primeiro quadro após cada mudança (extract.keyframes)
+        progress("Keyframes (baseline)...")
+        out["frames"] = keyframes(video, frames_dir, step_s or 1.0, thr)
+        progress(f"  {len(out['frames'])} keyframes")
 
     if summary:
         from summarize import backend_status, extract_topics, summarize, write_chapters_vtt
@@ -80,7 +85,8 @@ def build_web(v: str, video: Path, out: dict, frames_dir: Path) -> Path:
     for f in out["frames"]:
         shutil.copy(frames_dir / f["file"], dest / "frames" / f["file"])
     # contrato 5.3; "texto" fica vazio até o OCR (etapa 3) preencher
-    slides = [{"t": f["t"], "file": f"frames/{f['file']}", "texto": f.get("texto", "")} for f in out["frames"]]
+    slides = [{"t": f["t"], "file": f"frames/{f['file']}", "texto": f.get("texto", ""),
+               **{k: f[k] for k in ("t_complete", "t_end", "n_stages") if k in f}} for f in out["frames"]]
     (dest / "slides.json").write_text(json.dumps(slides, ensure_ascii=False, indent=2), encoding="utf-8")
     (dest / "transcript.json").write_text(json.dumps(
         [{"t": s["start"], "end": s["end"], "text": s["text"]} for s in out["segments"]],
@@ -105,11 +111,13 @@ def main():
     ap.add_argument("--vocab", help="lista de termos para o initial_prompt (ex.: data/gt/terms.txt)")
     ap.add_argument("--summary", choices=["ollama", "claude"], help="F9: gera o resumo com esse backend")
     ap.add_argument("--llm-model")
-    ap.add_argument("--step-s", type=float, default=1.0)
-    ap.add_argument("--thr", type=float, default=0.04)
+    ap.add_argument("--frames-mode", choices=["slides", "diff"], default="slides",
+                    help="slides: quadro completo de cada slide (padrão); diff: baseline por diferença de quadros")
+    ap.add_argument("--step-s", type=float, help="intervalo de amostragem (padrão: 0,5 s em slides, 1,0 s em diff)")
+    ap.add_argument("--thr", type=float, default=0.04, help="só no modo diff")
     ap.add_argument("--no-web", action="store_true")
     a = ap.parse_args()
-    process(a.video, a.model, a.device, a.vocab, a.summary, a.llm_model, a.step_s, a.thr, not a.no_web)
+    process(a.video, a.model, a.device, a.vocab, a.summary, a.llm_model, a.step_s, a.thr, not a.no_web, frames_mode=a.frames_mode)
 
 
 if __name__ == "__main__":
