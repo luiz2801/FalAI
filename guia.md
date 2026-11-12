@@ -15,7 +15,7 @@
 >
 > Este guia é uma foto do estado atual. Histórico de decisões vai em [docs/decisoes.md](docs/decisoes.md).
 
-**Mudanças da 0.3:** `extract.slides()` e `SlideTracker` (um quadro completo por slide, mesmo com bullets revelados aos poucos); `frames.json` ganha `t_complete`, `t_end`, `n_stages` e `visits`; `pipeline.py` ganha `--frames-mode` (padrão `slides`; `diff` é o baseline antigo). Detalhes em docs/decisoes.md (2026-11-12).
+**Mudanças da 0.3:** CLI `python src/extract.py <vídeo>` e seções 3.1 (como rodar) e 3.2 (como rodar no Docker); `extract.slides()` e `SlideTracker` (um quadro completo por slide, mesmo com bullets revelados aos poucos); `frames.json` ganha `t_complete`, `t_end`, `n_stages` e `visits`; `pipeline.py` ganha `--frames-mode` (padrão `slides`; `diff` é o baseline antigo). Detalhes em docs/decisoes.md (2026-11-12).
 
 **Mudanças da 0.2:** código das etapas 2, 4 e 5 e da F9, vindo da junção com o plano paralelo (docs/decisoes.md, 2026-11-11). Contrato do `raw.csv` ampliado (seção 5.5); novos arquivos de gabarito (5.7 a 5.9).
 
@@ -97,6 +97,7 @@ pipeline.py: aulaNN.mp4 ──► transcrição + keyframes (+ resumo) ──►
 | `uv lock` | Atualiza o `uv.lock` depois de mudar uma versão no `pyproject.toml` | Não usar `pip install` avulso |
 | `uv run python src/stt.py <mídia> --model small` | Transcreve uma mídia (`.vtt`, `.srt`, `.txt`, `.json`) | `--vocab data/gt/terms.txt` para o I5 |
 | `uv run python src/pipeline.py data/raw/aulaNN.mp4 --model small` | Vídeo de ponta a ponta e pacote da demo em `web/data/` | `--summary ollama` ou `--summary claude` para a F9; sem LLM, o resumo é pulado |
+| `uv run python src/extract.py <vídeo>` | Só os slides completos, sem STT (ver 3.1; no Docker, 3.2) | Grava em `data/derived/<vídeo>/frames/` |
 | `cd web && python -m http.server` | Serve a demo | Porta 8000. `file://` não funciona (o `fetch` é bloqueado) |
 | `uv run python src/run_experiments.py` | RQ1: `tiny`, `base`, `small` × limpo/20/10/0 dB × 3 repetições → `results/raw.csv` | `--models`, `--reps`, `--vocab` (I5), `--no-clean`, `--redo`. Pula o que já está no CSV |
 | `uv run python src/run_experiments.py --summaries --backend ollama` | F9: transcreve os vídeos inteiros e gera 2 resumos por modelo | `--backend claude --confirm-paid` para a API paga |
@@ -106,6 +107,172 @@ pipeline.py: aulaNN.mp4 ──► transcrição + keyframes (+ resumo) ──►
 | `tesseract --list-langs \| grep por` | Confirma o idioma português do Tesseract | Instalação de sistema: o usuário executa |
 
 ---
+
+### 3.1 Como rodar a extração de slides
+
+**1. Só os slides** (rápido: 2 a 4 s por vídeo de 6 a 14 min, sem GPU):
+
+```bash
+uv run python src/extract.py "data/raw/aula01.mp4"
+```
+
+Saída em `data/derived/aula01/frames/` (o nome da pasta é o do vídeo, sem a extensão):
+
+```
+data/derived/aula01/frames/
+├── 0000.png        # quadro COMPLETO de cada slide, na resolução original
+├── 0001.png
+└── frames.json     # tempos de cada slide (contrato 5.3)
+```
+
+No terminal sai uma linha por slide:
+
+```
+0001.png  início    10.5 s  completo    37.5 s  fim    42.0 s  estágios 5  visitas 1
+```
+
+Leitura: o slide entrou aos 10,5 s, ficou completo aos 37,5 s (o professor revelou 4 bullets, por isso 5 estágios) e saiu aos 42,0 s. `visitas` > 1 quer dizer que o professor voltou ao slide.
+
+**2. Opções** (todas opcionais):
+
+| Opção | Padrão | Use quando |
+|---|---|---|
+| `--out PASTA` | `data/derived/<vídeo>/frames` | Quer gravar em outro lugar (por exemplo, para comparar duas configurações) |
+| `--step-s S` | 0,5 | Os bullets aparecem muito rápido (diminua) ou quer mais velocidade (aumente) |
+| `--keep-thr X` | 0,9 | Slides diferentes estão sendo fundidos (suba) ou o mesmo slide sai duplicado (baixe) |
+| `--min-slide-s S` | 2,0 | Slides de poucos segundos estão sendo perdidos (baixe) ou relances viram slide (suba) |
+| `--ignore x0,y0,x1,y1` | nenhuma | Há algo fixo que mexe, como a webcam do professor num canto ou um relógio. Pode repetir |
+| `--roi x0,y0,x1,y1` | quadro inteiro | Quer analisar só a área do slide (por exemplo, cortar a barra do player) |
+
+As regiões são **frações do quadro** (0 a 1), com origem no canto superior esquerdo. Exemplo: webcam no canto inferior direito, ocupando os 25% da direita e os 30% de baixo:
+
+```bash
+uv run python src/extract.py data/raw/aula01.mp4 --ignore 0.75,0.7,1,1
+```
+
+O professor em movimento num canto já costuma ser ignorado sozinho (seção 4.1); `--ignore` é para quando isso não bastar. A região ignorada só sai da *comparação*: o PNG gravado continua inteiro.
+
+**3. Vídeo de ponta a ponta** (transcrição, slides e página da demo):
+
+```bash
+uv run python src/pipeline.py data/raw/aula01.mp4 --model small
+cd web && python -m http.server   # abrir http://localhost:8000
+```
+
+O pipeline usa `extract.slides` por padrão. Para comparar com o baseline antigo (primeiro quadro após cada mudança), use `--frames-mode diff`.
+
+**4. Pelo Python** (por exemplo, num notebook ou num experimento):
+
+```python
+import sys; sys.path.insert(0, "src")
+import extract
+
+slides = extract.slides("data/raw/aula01.mp4", "data/derived/aula01/frames", step_s=0.5,
+                        ignore=[(0.75, 0.7, 1, 1)])
+for s in slides:
+    print(s["file"], s["t"], s["t_complete"], s["n_stages"])
+```
+
+Para quadros que já estão em memória (testes, outro leitor de vídeo), use `extract.SlideTracker`: `feed(t, quadro_bgr)` a cada amostra e `finish(t_fim)` no final.
+
+**5. Conferir o resultado.** Os números da CLI não dizem se o resultado está certo; olhe as imagens. Uma folha de contato rápida:
+
+```bash
+uv run python - <<'PY'
+import cv2, glob, numpy as np
+fs = sorted(glob.glob("data/derived/aula01/frames/0*.png"))
+ims = [cv2.resize(cv2.imread(f), (480, 270)) for f in fs]
+while len(ims) % 4: ims.append(np.zeros_like(ims[0]))
+cv2.imwrite("contato.png", np.vstack([np.hstack(ims[i:i + 4]) for i in range(0, len(ims), 4)]))
+PY
+```
+
+O que procurar e o que fazer:
+
+| Sintoma | Causa provável | Ajuste |
+|---|---|---|
+| O slide saiu pela metade (faltam bullets) | O professor trocou de slide antes de terminar, ou o último estado durou menos de 1 s | Baixe `--step-s` para 0,25 |
+| O mesmo slide saiu em 2 arquivos | Algo fixo no quadro (relógio, ícone) mudou entre as visitas | `--ignore` na região, ou baixe `--keep-thr` |
+| Dois slides viraram um | Mesmo título e conteúdo parecido | Suba `--keep-thr` para 0,95 |
+| Apareceu o professor como slide | Fundo pouco liso e tinta baixa (ver `min_flat`, seção 4.1) | Ajuste `min_flat` no código e registre em `docs/decisoes.md` |
+| Cartões de logo (abertura e encerramento) aparecem | Parecem slides | Apague à mão por ora; ainda não há filtro |
+| Nenhum slide, ou menos do que o esperado | Slide com fundo de imagem ou degradê | Veja a armadilha 16 (limites conhecidos) |
+
+Cada mudança de limiar que alterar o resultado deve ir para `docs/decisoes.md` (CLAUDE.md, regra 7). As sugestões acima de `--step-s 0,25` e `--keep-thr 0,95` são orientação, não foram testadas em vídeo real.
+
+**6. Regerar.** Rodar de novo **sobrescreve** `NNNN.png` e o `frames.json`, mas **não apaga** PNGs antigos. Se o número de slides diminuir, sobram arquivos que o `frames.json` não lista. Apague a pasta `frames/` antes de regerar, ou use `--out` com uma pasta nova.
+
+### 3.2 Como rodar no Docker
+
+Útil para quem não tem Python 3.12, `uv` ou FFmpeg na máquina. A imagem traz tudo (CUDA 12.4, FFmpeg, Tesseract com `por`, as dependências fixadas). **A extração de slides não usa GPU**, então não precisa do NVIDIA Container Toolkit.
+
+> **Estado:** os comandos abaixo seguem o `Dockerfile` e o `docker-compose.yml`, mas **não foram executados**. A imagem `falai` ainda não foi construída nesta máquina. Ao testar pela primeira vez, corrija esta seção.
+
+**1. Construir a imagem** (uma vez; demora e baixa vários GB, por causa da base CUDA e das bibliotecas de ML):
+
+```bash
+docker build -t falai:latest .
+```
+
+O código de `src/` e `tests/` é **montado como volume**, não copiado a cada uso: depois de mudar um `.py` não precisa reconstruir a imagem. Só reconstrua se mudar `pyproject.toml` ou `uv.lock`.
+
+**2. Colocar o vídeo onde o contêiner enxerga.** O contêiner vê apenas `./data` e `./results` (e `./src`, `./tests`). Duas formas:
+
+- **Dentro de `data/raw/`** (a mais simples): copie o vídeo para `data/raw/aula01.mp4`. A pasta está no `.gitignore` e no `.dockerignore`. *Link simbólico não funciona*: o destino fica fora do contêiner.
+- **Montar a pasta onde o vídeo já está**, com `-v` (exemplos abaixo).
+
+**3. Rodar só os slides, sem GPU** (recomendado):
+
+```bash
+# vídeo em data/raw/
+docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+  -v "$PWD/src:/app/src:ro" -v "$PWD/data:/app/data" \
+  falai:latest python src/extract.py data/raw/aula01.mp4
+
+# vídeo em outra pasta do host, montada em /videos (somente leitura)
+docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+  -v "$PWD/src:/app/src:ro" -v "$PWD/data:/app/data" \
+  -v "$PWD/Financial Acumen for Non-Financial Managers:/videos:ro" \
+  falai:latest python src/extract.py "/videos/Renda receita e despesas Coursera.mkv"
+```
+
+Os PNGs e o `frames.json` aparecem no host, em `data/derived/<nome do vídeo>/frames/`. As opções da seção 3.1 (`--ignore`, `--step-s`...) vão depois do nome do vídeo.
+
+O `--user` faz os arquivos gerados pertencerem ao seu usuário, e não ao `root`. Sem ele, você teria de apagá-los com `sudo`.
+
+**4. Com `docker compose`** (o serviço `pipeline` já monta `src`, `tests`, `data` e `results`):
+
+```bash
+export HOST_UID=$(id -u) HOST_GID=$(id -g)
+docker compose run --rm pipeline python src/extract.py data/raw/aula01.mp4
+docker compose run --rm -v "$PWD/Financial Acumen for Non-Financial Managers:/videos:ro" \
+  pipeline python src/extract.py "/videos/Renda receita e despesas Coursera.mkv"
+docker compose run --rm pipeline bash        # shell dentro do contêiner
+```
+
+O serviço reserva a GPU (`deploy.resources.reservations`). **Sem o NVIDIA Container Toolkit, o `compose run` falha** ao iniciar (erro de driver `nvidia`). Nesse caso, use o `docker run` do passo 3, ou instale o toolkit (README, "Em contêiner").
+
+**5. Pipeline completo no contêiner** (STT + slides + página). Aqui a GPU ajuda, e o `docker run` precisa de `--gpus all`:
+
+```bash
+docker run --rm --gpus all --user "$(id -u):$(id -g)" -e HOME=/tmp \
+  -v "$PWD/src:/app/src:ro" -v "$PWD/data:/app/data" -v "$PWD/web:/app/web" \
+  falai:latest python src/pipeline.py data/raw/aula01.mp4 --model small
+cd web && python -m http.server     # no host
+```
+
+O `web/` também precisa ser montado, porque o pipeline grava a demo em `web/data/`. Os modelos do Whisper são baixados a cada execução, já que o `HOME=/tmp` do contêiner não persiste; para guardá-los, monte um volume de cache (por exemplo, `-v "$HOME/.cache/huggingface:/tmp/.cache/huggingface"`).
+
+**6. Testes no contêiner:** `docker compose run --rm pipeline` (roda `pytest -q`). Aqui o teste do Tesseract passa, porque a imagem traz o idioma `por`.
+
+**Problemas comuns**
+
+| Sintoma | Causa | Solução |
+|---|---|---|
+| `could not select device driver "nvidia"` | Sem NVIDIA Container Toolkit e usando `compose run` ou `--gpus` | Use `docker run` sem `--gpus` (slides não precisam), ou instale o toolkit |
+| `permission denied` ao gravar em `data/` | Faltou `--user "$(id -u):$(id -g)"`, ou uma execução anterior criou a pasta como `root` | Passe `--user`; corrija o dono da pasta (`sudo chown -R $USER data`) |
+| `OpenCV não abriu <vídeo>` | O caminho está errado *dentro* do contêiner | Use o caminho do contêiner (`/videos/...`, `data/raw/...`), não o do host |
+| Mudei o código e nada mudou | `src/` não foi montado | Inclua `-v "$PWD/src:/app/src:ro"` |
 
 ## 4. Módulos
 

@@ -303,3 +303,37 @@ def slides(video: str | Path, out_dir: str | Path, step_s: float = 0.5, **kwargs
     resultado = tracker.finish(n / fps)
     (out_dir / "frames.json").write_text(json.dumps(resultado, ensure_ascii=False, indent=2), encoding="utf-8")
     return resultado
+
+
+def _rect(texto: str) -> tuple[float, float, float, float]:
+    x0, y0, x1, y1 = (float(v) for v in texto.split(","))
+    if not (0 <= x0 < x1 <= 1 and 0 <= y0 < y1 <= 1):
+        raise ValueError(f"retângulo inválido: {texto} (use x0,y0,x1,y1 entre 0 e 1, com x0<x1 e y0<y1)")
+    return x0, y0, x1, y1
+
+
+def main() -> None:
+    import argparse
+
+    ap = argparse.ArgumentParser(description="Extrai um quadro completo por slide de um vídeo de aula.")
+    ap.add_argument("video")
+    ap.add_argument("--out", help="pasta de saída (padrão: data/derived/<nome do vídeo>/frames)")
+    ap.add_argument("--step-s", type=float, default=0.5, help="intervalo de amostragem, em segundos")
+    ap.add_argument("--keep-thr", type=float, default=0.9, help="tinta mantida para ser o mesmo slide")
+    ap.add_argument("--min-slide-s", type=float, default=2.0, help="duração mínima de um slide")
+    ap.add_argument("--roi", type=_rect, help="região analisada: x0,y0,x1,y1 em frações do quadro")
+    ap.add_argument("--ignore", type=_rect, action="append", default=[],
+                    help="região a ignorar (professor, player): x0,y0,x1,y1; pode repetir")
+    a = ap.parse_args()
+    video = Path(a.video)
+    out = Path(a.out) if a.out else Path(__file__).resolve().parent.parent / "data" / "derived" / video.stem / "frames"
+    extra = {"roi": a.roi} if a.roi else {}
+    res = slides(video, out, a.step_s, keep_thr=a.keep_thr, min_slide_s=a.min_slide_s, ignore=a.ignore, **extra)
+    print(f"{len(res)} slides em {out}")
+    for i, s in enumerate(res):
+        print(f"{s['file']}  início {s['t']:7.1f} s  completo {s['t_complete']:7.1f} s  fim {s['t_end']:7.1f} s  "
+              f"estágios {s['n_stages']}  visitas {len(s['visits'])}")
+
+
+if __name__ == "__main__":
+    main()
