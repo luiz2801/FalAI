@@ -1,4 +1,6 @@
-# Uso: ver README.md, seção "Rodar em contêiner".
+# Uso: ver README.md, seção "Em contêiner".
+# Este arquivo roda em CPU (qualquer máquina). Para usar uma GPU NVIDIA, some o override:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml run --rm pipeline ...
 services:
   pipeline:
     build: .
@@ -17,11 +19,4 @@ services:
       - ./results:/app/results
       # Vídeos da disciplina só entram na etapa 1, depois de confirmada a licença:
       # - "${VIDEO_DIR}:/app/data/raw:ro"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
     command: ["pytest", "-q"]

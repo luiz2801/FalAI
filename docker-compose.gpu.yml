@@ -1,0 +1,11 @@
+# Override opcional: reserva as GPUs NVIDIA do host (exige o NVIDIA Container Toolkit).
+# Uso: docker compose -f docker-compose.yml -f docker-compose.gpu.yml run --rm pipeline ...
+services:
+  pipeline:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
