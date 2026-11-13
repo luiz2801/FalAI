@@ -1,6 +1,6 @@
 # guia.md — Mapa do projeto Tema 9
 
-**Versão 0.3 — 2026-11-12**
+**Versão 0.4 — 2026-11-12**
 
 > Complementa o [CLAUDE.md](CLAUDE.md) (regras, decisões e roadmap). Descreve **o que existe hoje** e o contrato de cada módulo, para não precisar reler o código inteiro. O que está marcado com ⏳ é planejado.
 > Os detalhes de cada etapa (com trechos de código) estão no [guia de implementação](../Tema09_MVP_Guia_de_Implementacao.md), fora do repositório.
@@ -15,6 +15,8 @@
 >
 > Este guia é uma foto do estado atual. Histórico de decisões vai em [docs/decisoes.md](docs/decisoes.md).
 
+**Mudanças da 0.4 (F10, o slide como contexto; [docs/plano_contexto_cruzado.md](docs/plano_contexto_cruzado.md), decisões D14 a D20 em [docs/decisoes.md](docs/decisoes.md)):** `extract.slides` acha o painel do slide (`panel="auto"`, `panel.json`) e mede a mediana e o fundo liso dentro da ROI; `ocr.py` (Tesseract e EasyOCR opcional); `context.py` (glossário por slide e plano de intervalos), `context_stt.py` (modos B0, G, P, L, L+F e O), `context_fix.py` (correção com gate), `context_audit.py`, `calibration.py` e `eval_slides.py`; `stt.transcribe_array` e `hotwords`; `resolve_device` cai para CPU sem cuBLAS; `run_experiments.py --context` e `pipeline.py --context/--ocr`; tabelas 6 e 7 e figuras 5 a 7 no `report.py`; no Studio, a tela Correções e o contexto nas demais telas. Contrato do `raw.csv` ampliado (5.5) e arquivos novos (5.12 a 5.17).
+
 **Mudanças da 0.3:** CLI `python src/extract.py <vídeo>` e seções 3.1 (como rodar) e 3.2 (como rodar no Docker); `extract.slides()` e `SlideTracker` (um quadro completo por slide, mesmo com bullets revelados aos poucos); `frames.json` ganha `t_complete`, `t_end`, `n_stages` e `visits`; `pipeline.py` ganha `--frames-mode` (padrão `slides`; `diff` é o baseline antigo). Detalhes em docs/decisoes.md (2026-11-12).
 
 **Mudanças da 0.2:** código das etapas 2, 4 e 5 e da F9, vindo da junção com o plano paralelo (docs/decisoes.md, 2026-11-11). Contrato do `raw.csv` ampliado (seção 5.5); novos arquivos de gabarito (5.7 a 5.9).
@@ -28,13 +30,14 @@
 | 0. Ambiente | `pyproject.toml`, `uv.lock`, `.python-version`, `Dockerfile`, `docker-compose.yml`, `.dockerignore`, `README.md`, `.gitignore`, `tests/test_smoke.py` | 🟡 build OK no contêiner; falta o NVIDIA Container Toolkit (teste de GPU) e o Tesseract `por` no host |
 | 1. Dataset e gabarito | `data/raw/`, `data/gt/` | ⏳ depende de licença e de transcrição manual. Há exemplos de formato em `data/gt/*.example.*` |
 | 2. STT (F1, parte de F3 e F4) | `extract.py` (áudio), `stt.py`, `degrade.py` (ruído), `metrics.py` | ✅ código e testes. Testado de ponta a ponta com um vídeo e gabarito temporários, apagados depois |
-| 3. OCR (F2, parte de F3 e F4) | `extract.slides` ✅, `extract.keyframes` ✅ (baseline), `degrade.degrade_image` ✅, `ocr.py` ⏳, `metrics.word_pr` ✅ | 🟡 falta o `ocr.py` e o Tesseract `por` |
-| 4. Experimentos (F4) | `run_experiments.py` (RQ1, I5 e F9), `report.py` | 🟡 RQ1 pronta; RQ2 entra com o `ocr.py` |
+| 3. OCR (F2, parte de F3 e F4) | `extract.slides` ✅, `extract.keyframes` ✅ (baseline), `degrade.degrade_image` ✅, `ocr.py` ✅ (código), `metrics.word_pr` ✅ | 🟡 `ocr.py` testado com dublês (o teste com texto sintético é pulado: o Tesseract `por` não está instalado no host); falta a RQ2 (matriz de OCR por motor × degradação) |
+| 4. Experimentos (F4) | `run_experiments.py` (RQ1, I5, F9 e F10), `report.py` | 🟡 RQ1 e RQ6 a RQ8 (F10) com código e testes; falta dado real; RQ2 (OCR) ainda não |
 | 5. Interface (F5) | `pipeline.py`, `web/index.html` | ✅ player com legenda, slides, transcrição, busca e tópicos clicáveis. Backup da demo ⏳ |
-| GUI de trabalho | `studio.py`, `web/studio.html` | ✅ biblioteca, processar, experimentos, resultados, gabarito, análise de erros e A/B. Testada com dados sintéticos; falta uso com dados reais (etapa 1) |
+| GUI de trabalho | `studio.py`, `web/studio.html` | ✅ biblioteca, processar, experimentos, resultados, gabarito, análise de erros, A/B e Correções (F10). Testada com dados sintéticos; falta uso com dados reais (etapa 1) |
 | 6. Artigo | `artigo/` | 🟡 esqueleto; `[PENDENTE]` modelo SBC |
 | Desejável | F6 (busca com métricas), F7 (ablação) | ⏳ a busca da página já faz substring sobre fala e slides; faltam as consultas e `precision_at_k`, `mrr` |
 | Opcional | F8 (HLS) ⏳; F9 (resumo por LLM) ✅ `summarize.py`, `eval_summaries.py` | |
+| F10 | o slide como contexto: `context.py`, `context_stt.py`, `context_fix.py`, `context_audit.py`, `calibration.py`, `eval_slides.py`, `ocr.py` | 🟡 código, testes e integração com áudio real num trecho (observações em docs/decisoes.md, **não são resultados**). Faltam: o Tesseract no host, dado com licença e gabarito (etapa 1) e a auditoria humana das correções |
 
 ### Ambiente verificado
 
@@ -44,8 +47,10 @@
 | FFmpeg | 9.0.2 | instalado |
 | Tesseract | **não instalado** | instalado, **sem** `por` |
 | GPU | RTX 3060, 12 GB | nenhuma (CPU, `int8`) |
+| cuBLAS 12 (`libcublas.so.12`) | **ausente no host em 2026-11-12**: a GPU é vista, mas a inferência falhava; `device="auto"` agora cai para CPU/int8 com um aviso (D17). Resolver: instalar o CUDA 12 ou usar o contêiner | — |
 | CPU e RAM | 24 threads, 62 GB | i7-1260P, 16 threads, 15 GB |
 | Ollama | — | rodando, **sem modelos** baixados |
+| Whisper em cache (`~/.cache/huggingface`) | só o `medium` (2026-11-12); `tiny`, `base` e `small` baixam na 1ª execução | — |
 
 O RTF só é comparável dentro da mesma máquina: rode todos os experimentos na principal e reporte o hardware (`results/hardware.json`, gerado pelo `run_experiments.py`).
 
@@ -72,6 +77,10 @@ data/raw/aulaNN.mp4
   └─ F9: stt.transcribe (vídeo inteiro, cada modelo) ──► summarize.summarize (ollama | claude)
            ──► results/summaries/<v>__<modelo>__<llm>__r<k>.md ──► eval_summaries (às cegas) ──► raw.csv
 
+  F10: extract.slides (painel) ──► ocr.py ──► context.build_glossary ──► data/derived/aulaNN/{ocr,glossario}.json
+         └─ context_stt (B0, G, P, L, L+F, O) ──► context_fix (L+F) ──► correcoes.jsonl ──► tela Correções ──► context_audit ──► raw.csv
+            run_experiments --context ──► linhas <ruído>@<modo> no raw.csv ──► report.py (tabelas 6 e 7, figuras 5 a 7)
+
 results/raw.csv ──► report.py ──► results/tables/*.{csv,md}, results/figures/*.{png,pdf}
 
 pipeline.py: aulaNN.mp4 ──► transcrição + keyframes (+ resumo) ──► web/data/aulaNN/ ──► web/index.html
@@ -85,6 +94,7 @@ pipeline.py: aulaNN.mp4 ──► transcrição + keyframes (+ resumo) ──►
 - `run_experiments.py` orquestra a matriz. `eval_summaries.py` usa `run_experiments.row` e `append_rows`.
 - `report.py` só lê `results/raw.csv`. Não recalcula métrica.
 - `web/` só lê arquivos gerados. Não importa código Python.
+- `context.py` é puro (não importa `stt` nem `extract`, só no CLI). `context_fix.py` usa só `context`. `context_stt.py` usa `context`, `context_fix` e `stt`. `ocr.py` só bibliotecas externas. `calibration.py`, `context_audit.py` e `eval_slides.py` leem arquivos; os dois primeiros importam `run_experiments` só por caminhos e `append_rows`.
 
 ---
 
@@ -97,7 +107,7 @@ pipeline.py: aulaNN.mp4 ──► transcrição + keyframes (+ resumo) ──►
 | `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm pipeline` | Os mesmos testes no contêiner | Ver README |
 | `uv lock` | Atualiza o `uv.lock` depois de mudar uma versão no `pyproject.toml` | Não usar `pip install` avulso |
 | `uv run python src/stt.py <mídia> --model small` | Transcreve uma mídia (`.vtt`, `.srt`, `.txt`, `.json`) | `--vocab data/gt/terms.txt` para o I5 |
-| `uv run python src/extract.py <vídeo>` | Só os slides completos, sem STT (ver 3.1; no Docker, 3.2) | Grava em `data/derived/<vídeo>/frames/` |
+| `uv run python src/extract.py <vídeo>` | Só os slides completos, sem STT (ver 3.1; no Docker, 3.2) | Grava em `data/derived/<vídeo>/frames/` (e `panel.json`). `--panel off` ignora o painel; `--trace t0,t1` mostra as decisões do rastreio |
 | `uv run python src/pipeline.py data/raw/aulaNN.mp4 --model small` | Vídeo de ponta a ponta e pacote da demo em `web/data/` | `--summary ollama` ou `--summary claude` para a F9; sem LLM, o resumo é pulado |
 | `uv run --extra gui python src/studio.py` | FalAI Studio (GUI): vídeos, processar, experimentos, resultados, gabarito, erros e A/B | http://127.0.0.1:8000. Só em localhost, sem autenticação. Ver 4.10 |
 | `cd web && python -m http.server` | Serve a demo | Porta 8000. `file://` não funciona (o `fetch` é bloqueado) |
@@ -105,6 +115,14 @@ pipeline.py: aulaNN.mp4 ──► transcrição + keyframes (+ resumo) ──►
 | `uv run python src/run_experiments.py --summaries --backend ollama` | F9: transcreve os vídeos inteiros e gera 2 resumos por modelo | `--backend claude --confirm-paid` para a API paga |
 | `uv run python src/eval_summaries.py prepare` / `consolidate` | F9: pacote às cegas para os avaliadores; depois grava as notas no `raw.csv` | Ver seção 4.9 |
 | `uv run python src/report.py` | Tabelas e figuras a partir do CSV | Sem argumentos |
+| `uv run python src/context.py glossary data/raw/aulaNN.mp4` | F10: slides (com painel), OCR e glossário em `data/derived/aulaNN/` | `--ocr-json` usa um OCR pronto (sem Tesseract). Ver 3.3 |
+| `uv run python src/context_stt.py data/raw/aulaNN.mp4 --glossary data/derived/aulaNN/glossario.json --mode L+F` | F10: transcreve um vídeo ou trecho (`--offset-s`, `--dur-s`) com o slide como contexto | Modos B0, G, P, L, L+F e O; grava `.vtt`, `.json` e `.correcoes.jsonl` em `data/derived/<v>/ctx/` |
+| `uv run python src/run_experiments.py --context B0 G P L L+F O --models small` | F10 (RQ6 a RQ8): a matriz com o contexto | Exige `glossario.json` de cada vídeo; `O` exige `terms.txt`; `P` exige 2 vídeos. Ver 4.6 |
+| `uv run python src/pipeline.py data/raw/aulaNN.mp4 --context L+F` (ou `--ocr`) | Pacote da demo com o texto dos slides e o STT com contexto | Exige o Tesseract; sem ele o contexto é pulado, com o motivo |
+| `uv run python src/context_audit.py consolidate` | Marcações da tela Correções → linhas `precisao_correcoes` no `raw.csv` | Depois de auditar ouvindo o áudio |
+| `uv run python src/calibration.py` | `results/calibracao.csv`: a probabilidade das palavras do Whisper prevê que estão certas? | Lê as hipóteses de `data/derived/<v>/stt/` e o gabarito |
+| `uv run python src/eval_slides.py frames.json data/gt/aulaNN.slides_t.json` | Precisão e recall do extrator de slides contra o gabarito de tempo | Só dá números com o gabarito anotado |
+| `uv run --extra gui pytest tests/test_studio.py` | Os testes do Studio (pulados sem o extra `gui`) | |
 | `ollama pull qwen2.5:7b` | Baixa o LLM local padrão da F9 (~4,7 GB) | O usuário executa |
 | `tesseract --list-langs \| grep por` | Confirma o idioma português do Tesseract | Instalação de sistema: o usuário executa |
 
@@ -274,6 +292,43 @@ O `web/` também precisa ser montado, porque o pipeline grava a demo em `web/dat
 | `OpenCV não abriu <vídeo>` | O caminho está errado *dentro* do contêiner | Use o caminho do contêiner (`/videos/...`, `data/raw/...`), não o do host |
 | Mudei o código e nada mudou | `src/` não foi montado | Inclua `-v "$PWD/src:/app/src:ro"` |
 
+### 3.3 Como rodar o F10 (o slide como contexto)
+
+Plano e justificativa: [docs/plano_contexto_cruzado.md](docs/plano_contexto_cruzado.md). Pré-requisitos: o **Tesseract com o idioma `por`** (`sudo pacman -S tesseract tesseract-data-por`; o usuário executa) e, para a velocidade, a GPU funcionando (sem cuBLAS o `auto` cai para CPU).
+
+**1. Glossário de cada vídeo** (slides com painel, OCR e glossário):
+
+```bash
+uv run python src/context.py glossary data/raw/aula01.mp4
+# -> data/derived/aula01/{frames/, ocr.json, glossario.json}
+```
+
+Sem o Tesseract, mas com um OCR de outra origem (lista de slides com `texto`): `--ocr-json arquivo.json`.
+
+**2. Transcrever um trecho com o contexto** (para olhar o resultado):
+
+```bash
+uv run python src/context_stt.py data/raw/aula01.mp4 --glossary data/derived/aula01/glossario.json \
+  --mode L+F --model small --offset-s 95 --dur-s 180
+```
+
+**3. A matriz da RQ6 a RQ8** (precisa de `clips.csv`, do gabarito `.stt.txt` e do `glossario.json`):
+
+```bash
+uv run python src/run_experiments.py --context B0 G P L L+F O --models tiny base small
+uv run python src/context_audit.py consolidate    # depois de auditar as trocas na tela Correções
+uv run python src/calibration.py                   # opcional: a figura 6
+uv run python src/report.py
+```
+
+**4. Conferir os slides** antes de confiar no contexto: olhe as imagens (3.1, item 5) e, com o gabarito de tempo `data/gt/<v>.slides_t.json` anotado à mão, rode `eval_slides.py`. `extract.py --trace 170,215` mostra, a cada amostra estável, a tinta, o fundo liso e o motivo da rejeição (foi assim que se achou a causa do D14).
+
+| Sintoma | Causa provável | Ajuste |
+|---|---|---|
+| Nenhum slide num vídeo com moldura em volta | O painel não foi achado (`panel.json` com `roi` nulo) | `--roi x0,y0,x1,y1` à mão, ou `--trace` para ver o motivo |
+| O mesmo slide em dois arquivos, com uma miniatura da câmera que muda de tamanho | O episódio muda quando a miniatura muda (limite conhecido, D14) | Os termos são a união; ou `--ignore` na região da miniatura |
+| Um "slide" preto, sem texto, no fim | Painel vazio entre slides | Sai do glossário sozinho (sem texto, sem termos) |
+
 ---
 
 ## 4. Módulos
@@ -286,9 +341,10 @@ O `web/` também precisa ser montado, porque o pipeline grava a demo em `web/dat
 | `clip_audio(media, out_wav, start_s, dur_s)` | Recorta o trecho com gabarito (corta o áudio antes de transcrever) |
 | `load_audio(media) -> np.ndarray` | float32, 16 kHz, mono, em memória. É o que o `stt.transcribe` usa (armadilha 7.2.10) |
 | `media_duration(media)` | Duração pelo `ffprobe` |
-| `slides(video, out_dir, step_s=0.5, **kwargs) -> list[dict]` | Um quadro completo por slide (ver abaixo). Usado pelo `pipeline.py` |
+| `slides(video, out_dir, step_s=0.5, panel="auto", **kwargs) -> list[dict]` | Um quadro completo por slide (ver abaixo). Usado pelo `pipeline.py` |
 | `SlideTracker(out_dir=None, ...)` | Núcleo de `slides`: `feed(t, quadro)` e `finish(t_fim)`. Aceita quadros em memória (testes) |
 | `keyframes(video, out_dir, step_s=1.0, thr=0.04) -> list[dict]` | Baseline: primeiro quadro após cada mudança (ver abaixo) |
+| `panel_from_frames(frames) -> dict \| None`, `find_panel(video, n_samples=60)` | O painel do slide: `{"roi", "ocr_box", "votes", "frames"}` (frações do quadro) ou `None`. Ver "Painel" abaixo |
 
 **`slides`**: resolve o caso do professor que revela os bullets aos poucos (o `keyframes` guarda o primeiro quadro após a mudança, ou seja, o slide incompleto). Leitura sequencial, um quadro a cada `step_s`. Cada quadro vira uma máscara de "tinta" (pixels diferentes do fundo, em 480×270 cinza). Comparado ao quadro candidato do episódio: `mantido` = fração da tinta do candidato que continua (tolerância de 1 px); `acrescido` = fração da tinta atual que é nova.
 
@@ -303,6 +359,8 @@ O `web/` também precisa ser montado, porque o pipeline grava a demo em `web/dat
 
 Saída: `NNNN.png` (quadro original) e `frames.json` (contrato 5.3). Cria `out_dir` e confere o `cv2.imwrite`.
 
+**Painel (D14).** Em vídeos em que o slide fica num painel com moldura em volta (no curso de teste: painel preto numa moldura amarela, fita de título e miniatura da câmera), o quadro inteiro tem "tinta" demais e o fundo liso oscila. `slides(panel="auto")` chama `find_panel`: amostra ~60 quadros e, em cada um, acha a maior região lisa e de um só tom (blocos de 6 px com amplitude de cinza ≤ 10, mesma faixa de 32 níveis, buracos do texto preenchidos), apara às linhas e colunas que ela cobre em ≥ 60% (tira a fita do topo e a miniatura do canto) e só a aceita se ficar afastada de ≥ 3 das 4 bordas, ocupar < 85% do quadro e tiver um tom só (a parede do estúdio tem gradiente). Vale o painel em que mais quadros concordam (IoU ≥ 0,85, ≥ 3 votos e ≥ 4% dos quadros). `roi` é o retângulo do rastreio; `ocr_box` é a caixa da região inteira, que inclui a fita com o título. O resultado vai para `panel.json` (5.3). Slide em tela cheia, ou com faixa de título de ponta a ponta, não gera painel e usa o quadro inteiro, como antes. `SlideTracker` mede a mediana de cinza, a tinta e o fundo liso **dentro da `roi`** (sem `roi` nem `ignore`, o quadro inteiro: resultado idêntico ao da 0.3) e aceita `trace=função(dict)`, chamada a cada amostra estável com `tinta`, `liso`, `rejeitado`, `mantido` e `inicio` (CLI: `--trace t0,t1`).
+
 **`keyframes`** (baseline): amostra um quadro a cada `step_s` segundos com leitura sequencial (`cap.grab()`, sem seek). Reduz para 320×180 em cinza e guarda o quadro quando a diferença média para o último keyframe guardado (0–1) passa de `thr`. Grava `NNNN.png` (quadro original) e `frames.json` (`[{"t", "file"}]`) e devolve a lista. Cria `out_dir` se não existir e confere o retorno do `cv2.imwrite`.
 
 ### 4.2 `src/stt.py` (etapa 2)
@@ -310,10 +368,11 @@ Saída: `NNNN.png` (quadro original) e `frames.json` (contrato 5.3). Cria `out_d
 | Função | Faz |
 |---|---|
 | `fmt(t)`, `fmt_srt(t)` | Segundos → `HH:MM:SS.mmm` (WebVTT) / `HH:MM:SS,mmm` (SRT) |
-| `resolve_device(device="auto")` | `(device, compute_type)`: CUDA/`float16` se houver GPU, senão CPU/`int8` |
+| `resolve_device(device="auto")` | `(device, compute_type)`: CUDA/`float16` se houver GPU **e** `libcublas.so.12` carregar, senão CPU/`int8` com um aviso (D17) |
 | `load_model(size, device, cpu_threads=0)` | `WhisperModel` com cache; devolve `(modelo, segundos_de_carga)` (0 se já em cache) |
 | `unload_models()` | Esvazia o cache entre modelos |
-| `transcribe(media, size, device="auto", initial_prompt=None, clean=True, word_timestamps=True) -> (segs, duracao_s, tempo_s)` | Ver abaixo |
+| `transcribe_array(audio, size, device="auto", initial_prompt=None, hotwords=None, word_timestamps=True, cpu_threads=0, progress=None) -> (segs, duracao_s, tempo_s)` | O núcleo: transcreve um array float32 16 kHz mono, **sem** limpar |
+| `transcribe(media, size, device="auto", initial_prompt=None, clean=True, word_timestamps=True, ..., hotwords=None) -> (segs, duracao_s, tempo_s)` | Decodifica a mídia e chama `transcribe_array`. Ver abaixo |
 | `clean_segments(segs) -> (mantidos, removidos)` | Remove alucinações conhecidas e repetições (cada removido leva `reason`) |
 | `build_prompt(terms)`, `read_terms(path)` | I5: `initial_prompt` com o vocabulário, até ~600 caracteres |
 | `subtitle_blocks(segs, max_chars=42, max_lines=2, max_dur=7.0)` | Blocos de legenda equilibrados; `max_chars=None` → um bloco por segmento |
@@ -321,15 +380,23 @@ Saída: `NNNN.png` (quadro original) e `frames.json` (contrato 5.3). Cria `out_d
 | `plain_text(segs)` | Transcrição completa em parágrafos, sem cabeçalho nem tempos |
 | `save_outputs(segs, out_dir, stem, meta)` | `<stem>.vtt`, `.srt`, `.segments.srt` (para o LLM), `.txt`, `.json` |
 
-**`transcribe`**: decodifica a mídia com `extract.load_audio` e transcreve com `language="pt"`, `beam_size=5`, `vad_filter=True`, `condition_on_previous_text=False`. Consome o gerador **dentro** do cronômetro; carga do modelo e decodificação ficam fora. `segs` é uma lista de `{"id", "start", "end", "text", "avg_logprob", "no_speech_prob", "words"}` (`words`: `{"start", "end", "word", "probability"}` ou `None`). Com `clean=True`, os segmentos removidos ficam em `transcribe.last_removed`. `duracao_s` vem de `info.duration`.
+**`transcribe`**: decodifica a mídia com `extract.load_audio` e transcreve com `language="pt"`, `beam_size=5`, `vad_filter=True`, `condition_on_previous_text=False`. Consome o gerador **dentro** do cronômetro; carga do modelo e decodificação ficam fora. `segs` é uma lista de `{"id", "start", "end", "text", "avg_logprob", "no_speech_prob", "words"}` (`words`: `{"start", "end", "word", "probability"}` ou `None`). Com `clean=True`, os segmentos removidos ficam em `transcribe.last_removed`. `duracao_s` vem de `info.duration`. `hotwords` (F10) vale em **toda** janela de ~30 s; o `initial_prompt` só na primeira, porque com `condition_on_previous_text=False` o faster-whisper zera o prompt depois dela (D15).
 
-### 4.3 `src/ocr.py` ⏳ (etapa 3)
+### 4.3 `src/ocr.py` (etapa 3)
 
-**`ocr_tesseract(path) -> (texto, tempo_s)`**: `pytesseract.image_to_string(cv2.imread(path), lang="por", config="--psm 6")`. Testar `--psm 3` e usar o melhor para os dois motores, ou relatar a diferença.
+Os dois motores têm a mesma interface, `(imagem ou caminho, caixa) -> {"texto", "words", "tempo_s"}`; `words` é `[{"text", "conf", "x", "y", "w", "h"}]`, com a confiança de 0 a 100. O tempo conta o pré-processamento e o reconhecimento, **não** a leitura do arquivo (armadilha 7.1.6), igual para os dois motores.
 
-**`ocr_easyocr(path) -> (texto, tempo_s)`**: `" ".join(_reader.readtext(path, detail=0))`, com o `Reader` criado sob demanda (armadilha 7.2.1).
+| Função | Faz |
+|---|---|
+| `status(motor, lang="por") -> str \| None` | O motivo de o motor não poder rodar, com o comando que resolve, ou `None` |
+| `crop_box(img, box)` | Recorta a caixa (frações do quadro); sem caixa, o quadro inteiro |
+| `preprocess(img, invert="auto", target_height=1400, max_scale=3.0) -> (cinza, escala)` | Cinza, texto escuro sobre fundo claro (inverte se a mediana for < 128) e ampliação até ~1400 px de altura (os slides de 720p têm fonte pequena) |
+| `ocr_tesseract(img, box=None, psm=6, lang="por", pre=True, min_conf=0)` | `image_to_data`, com as linhas na ordem de leitura do Tesseract. `--psm 6` (bloco) e `4` (colunas) a comparar na RQ2 |
+| `ocr_easyocr(img, box=None, ...)` | `Reader(["pt"])` criado na 1ª chamada (armadilha 7.2.1). **Não foi exercitado com o pacote real** (não instalado) |
+| `ocr_slides(frames_dir, slides, box=None, motor="tesseract", **kw)` | OCR de cada slide do `frames.json`; devolve os mesmos dicts com `texto`, `words`, `ocr_conf` e `ocr_tempo_s` |
+| `lines_from_data`, `lines_from_easy` | Montam o texto e as palavras a partir da saída crua de cada motor (testáveis sem o motor) |
 
-Ambas seguem a assinatura `(path) -> (texto, tempo_s)`. A saída preenche `texto` no `slides.json` (contrato 5.3); o `pipeline.py` já copia esse campo para a página.
+A caixa vem do `panel.json` (`ocr_box`, que inclui a fita de título); sem painel, o quadro inteiro. No host de 2026-11-12 o Tesseract não está instalado: o teste com texto sintético é pulado e o resto é testado com dublês.
 
 ### 4.4 `src/degrade.py` (etapas 2 e 3)
 
@@ -353,6 +420,8 @@ Funções puras. Nenhuma lê arquivo.
 | `word_pr(ref, hyp) -> (precisao, recall)` | Multiconjunto de palavras; ignora a ordem |
 | `rtf(tempo_proc_s, duracao_s)` | Tempo de processamento / duração da mídia |
 | `term_accuracy(ref, hyp, terms)` | I5: ocorrências de cada termo na hipótese, limitadas às da referência, sobre o total na referência; e falsos positivos |
+| `word_flags(ref, hyp_tokens)` | F10: para cada palavra da hipótese (já normalizada), se está num trecho `equal` do alinhamento. Base da calibração |
+| `timed_term_accuracy(occurrences, hyp_tokens, window_s=3.0)` | F10 (camada A): acerto de termos com gabarito **parcial** `[(instante, termo)]`, com falsos positivos. Mesmo formato do `term_accuracy` |
 | `precision_at_k`, `recall_at_k`, `mrr` ⏳ (F6) | Métricas de busca |
 
 ### 4.6 `src/run_experiments.py` (etapa 4)
@@ -367,6 +436,8 @@ Funções puras. Nenhuma lê arquivo.
 - pula o que já está no CSV (`--redo` refaz).
 
 **F9** (`--summaries`): transcreve cada vídeo inteiro de `data/raw/` com cada modelo (reaproveita em `data/derived/<video>/summary/`), gera `--reps` resumos (padrão 2) e grava `tempo_llm` e `custo_usd`. O backend `claude` exige `--confirm-paid` (regra 12).
+
+**F10** (`--context B0 G P L L+F O`): para cada vídeo com trecho, gabarito **e** `data/derived/<v>/glossario.json` (`context.py glossary`), por modelo e condição de ruído, roda cada modo de `context_stt.transcribe_context` e grava as condições `<ruído>@<modo>` (`limpo@L`, `snr10@L+F`). Por repetição: `wer`, `cer`, `acerto_termos`, `acerto_termos_slide`, `acerto_termos_fora` (os termos do `terms.txt` humano divididos por `context.split_terms`), `falsos_positivos` e `taxa_alteracao` (contra o B0 do mesmo vídeo e ruído, que roda uma vez sem ser gravado, a menos que se peça `B0`). Também `tempo_ctx` por vídeo (OCR e glossário, de `ocr.json`; RTF sobre o vídeo inteiro) e a carga do modelo (uma vez). Mesmo protocolo da RQ1: carga e aquecimento fora do tempo, só a inferência no RTF, `--reps`, `--no-clean`, `--redo` e retomada pelo `raw.csv`. `P` usa o glossário do próximo vídeo da lista (exige ≥ 2 vídeos); `O` exige `data/gt/terms.txt`. Opções: `--via hotwords|initial_prompt`, `--margin-s`, `--lead-s`, `--lag-s`, `--no-carry`, `--max-terms`, `--tau`, `--s-min`. A hipótese e as correções da repetição 1 ficam em `data/derived/<v>/stt/<v>.<modelo>.<cond>@<modo>.{json,vtt,...}` e `.correcoes.jsonl`.
 
 Também grava `results/hardware.json`.
 
@@ -384,13 +455,20 @@ Só lê `results/raw.csv` (com duplicatas, vale a última linha) e produz o que 
 | `figures/fig3_termos_vocabulario` | I5: acerto de termos com e sem `initial_prompt` |
 | `figures/fig4_wer_nota_resumo` | F9: WER do modelo × nota do resumo (pergunta secundária) |
 | `tables/tabela5_erros_classificados` | Regra 11: trechos de erro classificados à mão (`results/erros.csv`), por modelo × categoria |
+| `tables/tabela6_contexto` | F10: média ± desvio (n) de WER, termos do slide e fora do slide, falsos positivos, palavras alteradas e precisão das correções, por modelo × ruído × modo |
+| `tables/tabela7_custo_contexto` | F10: RTF da inferência, ΔRTF contra o B0, RTF do OCR e do glossário e ΔRTF total (o oráculo não paga OCR) |
+| `figures/fig5_ganho_termos_snr` | F10, RQ7: ganho de termos do slide (L − B0, em pontos %) × SNR, uma linha por modelo |
+| `figures/fig6_calibracao_confianca` | F10: probabilidade da palavra × acerto, de `results/calibracao.csv` |
+| `figures/fig7_placebo` | F10, RQ6: termos do slide por modo (B0, P, G, L, L+F), com o oráculo tracejado |
 | Tabela 2 (OCR) ⏳ | CER, precisão e recall por motor × degradação |
 
-Tabelas em `.csv` e `.md`; figuras em `.png` (300 dpi) e `.pdf`. Nenhum número digitado à mão.
+Tabelas em `.csv` e `.md`; figuras em `.png` (300 dpi) e `.pdf`. Nenhum número digitado à mão. A `tabela3_tempo_stt` só usa as condições da RQ1 (sem `@`); as linhas de contexto ficam nas tabelas 6 e 7.
 
 ### 4.8 `web/index.html` e `src/pipeline.py` (etapa 5)
 
 `pipeline.process(video, model="small", device="auto", vocab=None, summary=None, ...)`: transcrição, keyframes e, com `summary`, o resumo e os capítulos. Se o backend do LLM não estiver disponível, o resumo é pulado com o motivo. Depois copia para `web/data/<video>/`: `video.<ext>`, `subs.vtt`, `slides.json`, `transcript.json`, `frames/`, `manifest.json` e, havendo resumo, `chapters.vtt` e `summary.md`. Também atualiza `web/data/videos.json`.
+
+**F10 no pipeline** (`context=None | "G" | "L" | "L+F"`, `ocr=False`): os slides passam a vir **antes** do STT; o OCR roda sobre a caixa de `panel.json`, o glossário é gravado (`glossario.json` e `ocr.json`) e o STT usa `context_stt`. O contexto vai no nome dos arquivos (`<v>.<modelo>.ctx-L.vtt`, `ctx-LF`), para não sobrescrever a transcrição sem contexto, e o `texto` do OCR entra no `slides.json` da página (a busca). Exige o modo de slides e o Tesseract; sem eles, o OCR e o contexto são pulados com o motivo e o resto segue. `ocr=True` só preenche o texto dos slides. Sem `context` nem `ocr`, nada muda.
 
 A página lê esses arquivos e tem player com legenda (`<track>`), seletor de vídeo e abas **Tópicos** (capítulos do resumo), **Slides** (miniaturas), **Transcrição** (com o trecho atual destacado) e **Resumo**. A busca é substring sem diferença de caixa nem de acento, sobre tópicos, texto dos slides e transcrição; clicar em qualquer item faz `video.currentTime = t`. Funciona em tema claro e escuro.
 
@@ -418,13 +496,14 @@ Também: `backend_status(backend, model)` (motivo da indisponibilidade ou `None`
 
 | Tela | O que faz | Rotas | Grava |
 |---|---|---|---|
-| Vídeos | Biblioteca com status (STT, slides, OCR ⏳, resumo, trecho, gabarito); envio com licença obrigatória | `GET`/`POST /api/videos` | `data/raw/<nome>`, `data/raw/licenses.json` |
+| Vídeos | Biblioteca com status (STT, slides, OCR, glossário, resumo, trecho, gabarito); envio com licença obrigatória | `GET`/`POST /api/videos` | `data/raw/<nome>`, `data/raw/licenses.json` |
 | Processar | `pipeline.process` com etapas e log ao vivo; mostra o comando CLI equivalente | `POST /api/jobs` | o mesmo do `pipeline.py` |
 | Experimentos | Matriz da RQ1 (modelos × condições × repetições, `--vocab`, `--no-clean`, `--redo`) ou da F9; plano com o que está pendente; roda e interrompe | `POST /api/experiments/plan`, `POST /api/experiments` | o mesmo do `run_experiments.py` |
 | Resultados | WER/CER × SNR (linhas por modelo), RTF × erro (dispersão), tabelas média ± desvio (n), tempo, termos (I5), resumos (F9), hardware; filtro por vídeo; botão que roda o `report.py` e galeria das figuras | `GET /api/results`, `POST /api/report`, `GET /api/results/{table,figure}/<nome>` | só via `report.py` |
 | Gabarito | Escolhe o trecho no vídeo (início e duração) e transcreve ouvindo o áudio do trecho; atalhos de teclado; rascunho no navegador | `GET /api/gt`, `PUT /api/gt/<v>/clip`, `POST /api/gt/<v>/clip-audio`, `GET`/`PUT /api/gt/<v>/text`, `GET /api/raw/<arq>`, `GET /api/media/<v>/<cond>` | `data/gt/clips.csv`, `data/gt/<v>.stt.txt`, `data/derived/<v>/<v>.clip.limpo.wav` |
 | Erros | Diff gabarito × hipótese (`metrics.align`), classificação de cada trecho de erro por categoria (D12), resumo por modelo | `GET /api/errors/sources`, `GET /api/errors/<v>/<modelo>/<cond>`, `PUT …/<idx>`, `GET /api/errors/summary` | `results/erros.csv` (5.10) |
 | A/B | Mesmo trecho em duas condições, com WER/CER do `raw.csv`, legenda sincronizada e troca A/B na mesma posição (tecla A). Para a demo | `GET /api/ab/<v>/<modelo>/<cond>` | — |
+| Correções | Cada troca do `context_fix` (condição `L+F` e `pipeline --context L+F`), com a frase antes e depois, o áudio e os botões certa, errada e não sei (teclas 1, 2 e 3; R ouve o trecho). Precisão = certas ÷ (certas + erradas). Avisa quando o registro mudou depois da marcação | `GET /api/ctx/corrections`, `PUT /api/ctx/corrections/<v>/<modelo>/<cond>/<idx>` | `results/correcoes_auditoria.csv` (5.16) |
 
 Regras que a GUI respeita:
 
@@ -433,9 +512,52 @@ Regras que a GUI respeita:
 - **API paga** (regra 12): resumo com Claude exige `confirm_paid` (HTTP 402 sem ele), na tela Processar e na de Experimentos.
 - **Reprodutibilidade**: experimentos e relatório rodam como subprocesso, com o mesmo comando do CLI (mostrado na tela). Interromper mata o subprocesso; rodar de novo retoma, porque o script pula o que já está no `raw.csv`.
 
-Trabalhos: fila única (a GPU é uma só), em memória; somem ao reiniciar o servidor. O processamento de um vídeo roda no próprio processo e não pode ser interrompido no meio; experimentos e relatório podem. A etapa do processamento vem do prefixo das mensagens de `progress` do pipeline (`STT`, `Slides`, `Keyframes`, `Resumo`, `Demo`; constante `STAGES`), e o progresso dos experimentos conta as linhas `[hh:mm:ss] …` que o `run_experiments.py` imprime por combinação ou por resumo (`_DONE_LINE`). Se mudar essas mensagens, mude as constantes. `CONDITIONS` e `EXTS` repetem as de `run_experiments`; um teste confere.
+Trabalhos: fila única (a GPU é uma só), em memória; somem ao reiniciar o servidor. O processamento de um vídeo roda no próprio processo e não pode ser interrompido no meio; experimentos e relatório podem. A etapa do processamento vem do prefixo das mensagens de `progress` do pipeline (`STT`, `Slides`, `Keyframes`, `OCR`, `Resumo`, `Demo`; constante `STAGES`), e o progresso dos experimentos conta as linhas `[hh:mm:ss] …` que o `run_experiments.py` imprime por combinação ou por resumo (`_DONE_LINE`). Se mudar essas mensagens, mude as constantes. `CONDITIONS`, `CONTEXTS` e `EXTS` repetem as de `run_experiments`; um teste confere.
 
-As hipóteses das telas Erros e A/B são as que `run_experiments` guarda (repetição 1) em `data/derived/<v>/stt/<v>.<modelo>.<cond>.json`, só para vídeos com gabarito. O visualizador aceita `index.html?v=<id>`. O OCR aparece como ⏳ até a etapa 3.
+As hipóteses das telas Erros e A/B são as que `run_experiments` guarda (repetição 1) em `data/derived/<v>/stt/<v>.<modelo>.<cond>.json`, só para vídeos com gabarito. O visualizador aceita `index.html?v=<id>`. As telas Processar (contexto dos slides), Experimentos (modo F10), Resultados (tabela do contexto), Erros e A/B (condições `<ruído>@<modo>`) aceitam o F10. A tela Resultados mantém a RQ1 e o contexto em tabelas separadas: o RTF médio da RQ1 não se mistura com o das condições de contexto. A validação do nome da condição só barra caracteres perigosos (`_check_cond`).
+
+### 4.11 `src/context.py` (F10)
+
+Funções puras: nada carrega modelo nem lê vídeo.
+
+| Função | Faz |
+|---|---|
+| `extract_terms(texto) -> [{"text", "kind", "titulo"}]` | Termos de um slide: `sigla` (CMN, BACEN, B3; "IMFs" vira IMF), `nome` (Conselho Monetário Nacional), `numero` (Lei Complementar 179) e `termo` (palavra de 6+ letras fora de uma lista de palavras funcionais). Linha só em maiúsculas não gera siglas: com 2 a 4 palavras vira um `nome`; uma palavra sozinha é sigla. Tira os marcadores que o OCR leu como "e" ou "o" |
+| `build_glossary(slides, boiler_frac=0.5, max_terms=40)` | Glossário por slide, com `weight` (tipo × raridade entre os slides do vídeo × título) e `pron` das siglas (soletrada, "cê ême ene", e como palavra, se `pronounceable`). O termo que está em ≥ 50% dos slides (rodapé, nome do curso) sai, havendo ≥ 3 slides |
+| `plan_intervals(glossary, duration_s, lead_s=2, lag_s=1, carry=True, min_interval_s=4, neighbor_weight=0.5, max_terms=30)` | Particiona `[0, duração]` em intervalos contíguos, cada um com os termos do slide visível (e os dos vizinhos, com metade do peso). Cada visita a um slide vira um intervalo; entre slides distantes, o intervalo sem slide herda os termos do último (`carry`) |
+| `global_terms(glossary, k)`, `hotwords(terms, max_chars=600)`, `placebo_like(terms, outro_glossario, exclude, seed)` | Modo G, a string do `hotwords` (o faster-whisper trunca em 223 tokens) e o glossário placebo |
+| `shift_glossary(glossary, offset_s, duration_s)`, `split_terms(terms, glossary)`, `read_timed_terms(path)`, `load_glossary`, `save_glossary` | Do tempo do vídeo para o do trecho; os termos humanos em "no slide" × "fora"; o gabarito parcial `.termos.tsv` |
+| `spell`, `pronounceable`, `key`, `strip_accents` | Nomes das letras em PT-BR; sigla lida como palavra (BACEN, SELIC, ANBIMA); chave de comparação |
+
+CLI: `python src/context.py glossary <vídeo> [--ocr-json arq] [--motor tesseract|easyocr] [--psm 6] [--panel auto|off]`.
+
+### 4.12 `src/context_stt.py` (F10)
+
+`transcribe_context(audio, mode, asr, glossary, oracle_terms, placebo_glossary, plan_kw, margin_s=2, max_terms=30, tau=0.5, s_min=0.85, seed=0, clean=True) -> dict` com `segs`, `tempo_s` (soma das chamadas: só a inferência), `n_calls`, `plan`, `removed`, `corrections` e `fix_summary`. O `asr(audio, texto) -> (segmentos, tempo_s)` é injetado: `make_asr(size, device, via="hotwords")` é o de verdade (`stt.transcribe_array`, com os parâmetros fixos do projeto); os testes usam um falso.
+
+- **B0** uma chamada sem termos (idêntica ao `stt.transcribe`); **G** uma chamada com os termos do vídeo todo; **O** uma com o `terms.txt` humano; **L** uma chamada por intervalo do plano, com os termos do slide; **P** como o L, com termos sorteados de **outro** vídeo (mesmo tipo e tamanho, fora dos termos do trecho); **L+F** o L e `context_fix.fix_segments`.
+- **Cada chamada** recebe a fatia `[t0 − margem, t1 + margem]` do **array** de áudio (não `clip_timestamps`: com ele o `vad_filter` é desligado, linha 885 do faster-whisper, e quebraria "mesmos parâmetros"). A palavra fica com o intervalo que contém o seu ponto médio, e os segmentos são refeitos só com essas palavras: por segmento, dois recortes vizinhos duplicariam ou perderiam fala na fronteira. Com um intervalo só, nada muda.
+- `drop_leaks`: o Whisper às vezes repete o glossário em silêncio. Sai o segmento com ≥ 3 palavras, todas do vocabulário do intervalo e com `no_speech_prob` > 0,5 ou `avg_logprob` < −1 (quem diz de fato o termo tem fala de verdade e fica). `reason="vazamento"` em `removed`.
+- `hyp_tokens(segs)` (para `metrics.timed_term_accuracy`), `changed_fraction(base, novo)` (a `taxa_alteracao`) e `hyp_text`.
+
+CLI: `python src/context_stt.py <mídia> --glossary glossario.json --mode L+F --model small [--offset-s 95 --dur-s 180] [--via hotwords|initial_prompt] [--oracle-terms terms.txt] [--placebo-glossary outro.json]`.
+
+### 4.13 `src/context_fix.py` (F10, D16)
+
+`fix_segments(segs, plano, tau=0.5, s_min=0.85, max_span=3, kinds=("sigla", "nome")) -> (segmentos, registro, resumo)`. Só olha os termos do **slide visível naquele instante** (o `plano` de `plan_intervals`). Regras, nessa ordem:
+
+- **R3** letras soletradas em palavras separadas que formam uma sigla do slide ("c m n", "cê ême ene", "bê três" viram CMN e B3), sem gate;
+- **R2** sigla a 1 edição de uma do slide: token em maiúsculas ("CMR" vira CMN) sem gate de confiança, ou token só de consoantes com `p < tau` ("cml" vira CMN);
+- **R1** palavra(s) de baixa confiança (`p < tau`) cuja chave fonética (`phonetic_key`: c/ç/ss/s/z/x, qu/gu, ch/lh/nh, g/j, h mudo, vogais átonas, nasal final) tem `similarity ≥ s_min` com uma sigla ou um nome do slide ("Bassim" e "bassé" viram BACEN). R1 não apaga palavra que não faz falta (se tirar a primeira ou a última mantém a semelhança, o span não vale), e a nasal final conta como opcional. Palavra com `p ≥ tau` nunca muda por R1.
+
+Preserva a pontuação. Cada troca vai para o registro: `{"t", "antes", "depois", "p", "sim", "regra", "slide", "termo", "auditoria": null, "seg_antes", "seg_depois"}`. Segmentos sem `words`, ou cujo texto não bate com as palavras, ficam como estão (`segmentos_pulados`). Não altera a entrada.
+
+### 4.14 Auditoria, calibração e avaliação dos slides (F10)
+
+- **`src/context_audit.py consolidate`**: das marcações do Studio (`results/correcoes_auditoria.csv`) para o `raw.csv`. `precisao_correcoes` = certas ÷ (certas + erradas) por (vídeo, modelo, condição) da RQ6; "não sei" e as trocas do pipeline ficam de fora. Rodar de novo atualiza (vale a última linha).
+- **`src/calibration.py`**: `collect()` alinha cada hipótese guardada (`data/derived/<v>/stt/*.json`, de vídeos com gabarito) com o gabarito (`metrics.word_flags`) e junta por faixa de probabilidade (10 faixas) quantas palavras estão certas; `ece()` resume o desvio. Grava `results/calibracao.csv` (5.17). Palavras trocadas pela correção (`orig`) ficam de fora.
+- **`src/eval_slides.py`**: `evaluate(pred, gt, tol_s=2.0)` casa os slides detectados (`frames.json`) com o gabarito de tempo (`.slides_t.json`, 5.15) pelo início e devolve precisão, recall, `extras`, `perdidos` e `completos` (o quadro guardado é o completo?). CLI: `python src/eval_slides.py frames.json gabarito.json [tolerância]`.
+
 
 ---
 
@@ -445,7 +567,7 @@ As hipóteses das telas Erros e A/B são as que `run_experiments` guarda (repeti
 
 **5.2 Gabarito de slides** `data/gt/<video>.slides.json`: lista `[{"t": 125.0, "texto": "..."}]`, `t` em segundos. Use `texto`, a mesma chave da saída (docs/decisoes.md).
 
-**5.3 Slides derivados** `frames.json` de `extract.slides`: `[{"t", "t_complete", "t_end", "n_stages", "visits", "file"}]` (`t` = início do slide, é para onde o clique salta; `t_complete` = quando ficou completo; `visits` = `[[início, fim], ...]`). O baseline `keyframes` grava só `{"t", "file"}`. `slides.json` da página: `[{"t", "file", "texto"}]` mais `t_complete`, `t_end` e `n_stages` quando existem; `texto` vazio até o OCR.
+**5.3 Slides derivados** `frames.json` de `extract.slides`: `[{"t", "t_complete", "t_end", "n_stages", "visits", "file"}]` (`t` = início do slide, é para onde o clique salta; `t_complete` = quando ficou completo; `visits` = `[[início, fim], ...]`). O baseline `keyframes` grava só `{"t", "file"}`. `slides.json` da página: `[{"t", "file", "texto"}]` mais `t_complete`, `t_end` e `n_stages` quando existem; `texto` vazio até o OCR. `panel.json`, ao lado do `frames.json`: `{"modo": "auto" | "manual" | "off", "roi": [x0, y0, x1, y1] | null, "ocr_box": [...] | null}`, em frações do quadro; `roi` é a região do rastreio e `ocr_box` a do OCR (inclui a fita de título). Com o OCR, os slides ganham `texto`, `words`, `ocr_conf` e `ocr_tempo_s` (5.14).
 
 **5.4 Legenda** `.vtt`: `WEBVTT`, linha em branco, blocos `HH:MM:SS.mmm --> HH:MM:SS.mmm` com o texto nas linhas seguintes (no máximo 2 linhas de 42 caracteres). O `.srt` segue o mesmo corte, numerado. O `.segments.srt` tem um bloco por segmento e é a entrada do LLM.
 
@@ -462,8 +584,10 @@ video,tarefa,modelo,condicao,repeticao,metrica_erro,valor_erro,tempo_s,duracao_s
 | `resumo` | `<backend>:<modelo do LLM>` | `tempo_llm` (sem valor), `custo_usd` | `tempo_s` = tempo do LLM |
 | `resumo` | idem | `nota_media`, `fidelidade`, `cobertura`, `precisao_timestamps` (de `eval_summaries.py`) | — |
 | `ocr` ⏳ | `limpo`, `resize0.5`, `blur9`, `jpeg30` | `cer`, `precisao_palavras`, `recall_palavras` | |
+| `stt` | `<ruído>@<modo>` (`limpo@L`, `snr10@L+F`; modos B0, G, P, L, L+F, O) | `wer`, `cer`, `acerto_termos`, `acerto_termos_slide`, `acerto_termos_fora`, `falsos_positivos`, `taxa_alteracao`, `precisao_correcoes` | `tempo_s`, `duracao_s` e `rtf` (só a inferência) em toda linha, exceto `precisao_correcoes` (sem tempo) |
+| `stt` | `ctx` (modelo `_`) | `tempo_ctx` (sem valor) | `tempo_s` = OCR + glossário do vídeo; `duracao_s` = duração do vídeo inteiro |
 
-Na tarefa `stt`, `modelo` pode ter o sufixo `-semfiltro` (`--no-clean`). Na tarefa `resumo`, `modelo` é o modelo de STT que gerou a transcrição. Separador vírgula; lido com `pandas.read_csv` sem opções.
+Na tarefa `stt`, `modelo` pode ter o sufixo `-semfiltro` (`--no-clean`). Na tarefa `resumo`, `modelo` é o modelo de STT que gerou a transcrição. Separador vírgula; lido com `pandas.read_csv` sem opções. As condições `<ruído>@<modo>` (F10) não entram nas tabelas da RQ1 (`tabela3_tempo_stt`, a tela Resultados); as linhas antigas continuam válidas.
 
 **5.6 Nomes**: aulas são `aula01`, `aula02`… Modelos de STT são `tiny`, `base`, `small`, `medium`, `large-v3`.
 
@@ -476,6 +600,18 @@ Na tarefa `stt`, `modelo` pode ter o sufixo `-semfiltro` (`--no-clean`). Na tare
 **5.10 Erros classificados** `results/erros.csv` (regra 11; gravado pela tela Erros do Studio): `video,modelo,condicao,idx,tipo,ref,hyp,categoria,nota`. `idx` é a posição do trecho em `metrics.align(gabarito, hipótese)`; `tipo` é `substitute`, `delete` ou `insert`; `ref` e `hyp` são as palavras normalizadas do trecho (servem para detectar marcações desatualizadas quando o gabarito ou a hipótese muda); `categoria` é uma das chaves de D12. Uma linha por trecho marcado.
 
 **5.11 Licenças** `data/raw/licenses.json` (gravado pelo envio do Studio): `{"<arquivo>": "<licença/origem>"}`. Fica fora do git com `data/raw/`; a tabela do README continua sendo o registro oficial.
+
+**5.12 Glossário** `data/derived/<v>/glossario.json` (`context.py glossary`; no tempo do vídeo): `[{"slide": "0003.png", "t", "t_end", "visits": [[a, b], ...], "terms": [{"text": "BACEN", "kind": "sigla", "weight": 0.82, "pron": ["bê á cê é ene", "bacen"]}]}]`. `kind`: `sigla`, `nome`, `numero` ou `termo`; `weight` de 0 a 1, em ordem decrescente; `pron` só nas siglas.
+
+**5.13 Correções** `<stem>.correcoes.jsonl` (uma troca do `context_fix` por linha): `{"t", "antes", "depois", "p", "sim", "regra" (R1, R2 ou R3), "slide", "termo", "auditoria": null, "seg_antes", "seg_depois"}`. Da RQ6: `data/derived/<v>/stt/<v>.<modelo>.<ruído>@L+F.correcoes.jsonl` (`t` relativo ao trecho). Do pipeline: `data/derived/<v>/<v>.<modelo>.ctx-LF.correcoes.jsonl` (`t` relativo ao vídeo).
+
+**5.14 OCR** `data/derived/<v>/ocr.json`: `{"motor", "psm", "tempo_s", "glossario_s", "slides": [{...o frames.json, "texto", "words": [{"text", "conf", "x", "y", "w", "h"}], "ocr_conf", "ocr_tempo_s"}]}`.
+
+**5.15 Gabaritos novos** (humanos, regra 3). `data/gt/<v>.slides_t.json`: `[{"t": 25.0, "t_complete": 275.0, "t_end": 311.0, "titulo": "CMN – Conselho Monetário Nacional"}]`, anotado vendo o vídeo (`eval_slides.py`). `data/gt/<v>.termos.tsv`: uma linha `t_s<TAB>termo` por ocorrência falada de termo técnico, anotada **ouvindo** o áudio (o slide só serve para a grafia); `#` comenta (`context.read_timed_terms`, `metrics.timed_term_accuracy`). Ainda não há tela de anotação: editar o arquivo.
+
+**5.16 Auditoria das correções** `results/correcoes_auditoria.csv` (tela Correções do Studio): `video,modelo,condicao,idx,t,antes,depois,auditoria,nota`. `idx` é a posição da troca no `.correcoes.jsonl`; `antes`, `depois` e `t` servem para detectar marcação desatualizada (a RQ6 foi refeita); `auditoria` é `certa`, `errada` ou `duvida`. `condicao` pode ser `pipeline@L+F` (trocas do pipeline, que não vão para o `raw.csv`).
+
+**5.17 Calibração** `results/calibracao.csv` (`calibration.py`): `modelo,condicao,bin_lo,bin_hi,n,conf_media,acerto`. E o `results/hardware.json` ganha `device_auto`: o dispositivo que o `--device auto` de fato usa (D17).
 
 ---
 
@@ -511,6 +647,11 @@ Todos valem igual para todos os modelos e motores de uma mesma comparação.
 | Tolerância dos timestamps | ±30 s | `eval_summaries.py` | F9 |
 | Trecho com gabarito | 2 a 3 min por vídeo, começando no início de uma frase | dataset | Armadilha 21 |
 | Vídeos da matriz | 6, de 5 a 15 min | dataset | Vídeos longos (~45 min) ficam fora da matriz |
+| Painel do slide (`PANEL_*`) | bloco de 6 px; liso: amplitude ≤ 10; faixa de cinza de 32; cobertura ≥ 60%; afastado ≥ 4% de ≥ 3 bordas; área < 85%; ≥ 3 votos, IoU ≥ 0,85 | `extract.find_panel` | `[PREMISSA]` (D14); calibrado nos 15 vídeos de teste, de um só curso |
+| Contexto: `lead_s`, `lag_s`, `margin_s`, `min_interval_s`, `neighbor_weight`, `max_terms` | 2 s; 1 s; 2 s; 4 s; 0,5; 30 termos | `context.plan_intervals`, `context_stt` | `[PREMISSA]` (ablação: margem {0, 2, 5}; termos {10, 30, 60}) |
+| Glossário: `boiler_frac`, termos por slide, `max_hotword_chars` | 0,5; 40; 600 caracteres (o faster-whisper trunca em 223 tokens) | `context.build_glossary`, `hotwords` | `[PREMISSA]` |
+| Correção: `tau`, `s_min`, `max_span`, `kinds` | 0,5; 0,85; 3 palavras; siglas e nomes | `context_fix.fix_segments` | `[PREMISSA]` sem calibração (ablação de `tau` em {0,3; 0,5; 0,7}); congelar na camada A antes de rodar a B |
+| Como o contexto entra | `hotwords` | `context_stt.make_asr(via=)` | D15 |
 
 ---
 
@@ -559,6 +700,18 @@ Todos valem igual para todos os modelos e motores de uma mesma comparação.
 23. **Demo ao vivo pode falhar.** Vídeo de backup gravado antes.
 24. **Vídeos na pasta `web/`.** `web/data/` é gerado e fica fora do git.
 
+### 7.5 F10 e ambiente
+
+25. **`initial_prompt` só vale na 1ª janela.** Com `condition_on_previous_text=False` o faster-whisper 1.2.1 zera o prompt depois da primeira janela de ~30 s (`prompt_reset_since`, linhas 1373 a 1383 de `transcribe.py`); o `hotwords` vale em toda janela (linha 1542). A condição `limpo_vocab` (I5) usa `initial_prompt`: provavelmente subestima o efeito do vocabulário (D15; decisão C2 pendente). O F10 usa `hotwords`. Falta o teste empírico por janela.
+26. **GPU vista, mas sem cuBLAS.** `ctranslate2.get_cuda_device_count()` conta a GPU mesmo sem `libcublas.so.12`, e a inferência falhava no meio. `resolve_device("auto")` agora confere a biblioteca e cai para CPU com um aviso (D17). `--device cuda` não é checado.
+27. **O ganho do contexto sem placebo não prova nada.** Qualquer prompt muda a saída: no teste com áudio real, o placebo alterou 8,4% do texto contra 6,2% do contexto real, e introduziu um erro. Daí P, O e o `acerto_termos_fora` (D19).
+28. **A transcrição muda com o recorte do áudio.** O mesmo trecho cortado pelo FFmpeg para WAV e cortado do array em memória deu erros diferentes. Todos os modos de uma comparação usam o mesmo array, e diferenças de poucas palavras não valem sozinhas (bootstrap sobre ocorrências de termos).
+29. **`acerto_termos` com termos do OCR é circular.** O `terms.txt` é humano (regra 3); o glossário nunca entra na métrica. `context.split_terms` só **divide** os termos humanos em "no slide" e "fora do slide".
+30. **A correção pode estragar texto certo.** Foi o que fez `a composição → Composição` antes do D16. Só siglas e nomes são alvo, palavra que não faz falta não é apagada, e toda troca vai para o registro e para a auditoria humana (tela Correções). O que não está na tela ("Pimek"/"PIMEC") o método não corrige.
+31. **Slide antecipado ou revisitado.** Quem apresenta cita o termo antes de trocar o slide e demora a largar o anterior: `lead_s` e `lag_s`. O slide vizinho entra com metade do peso.
+32. **Os vídeos do banco de testes não têm licença** (D20). Nada deles vai ao git, ao artigo ou aos slides; a pasta está no `.gitignore` e no `.dockerignore`.
+
+
 ---
 
 ## 8. Testes
@@ -572,6 +725,12 @@ Todos valem igual para todos os modelos e motores de uma mesma comparação.
 | `tests/test_extract.py` | `keyframes` em vídeo sintético (3 "slides" → 3 keyframes); `out_dir` inexistente; áudio 16 kHz mono; recorte. `SlideTracker`/`slides`: bullets revelados (quadro final completo, volta ao slide sem duplicar), professor no canto (ruído), professor em tela cheia, volta mais completa substitui a parcial, relance transitório, gravação de arquivos e `frames.json` |
 | `tests/test_studio.py` | API do Studio com `TestClient` e pastas temporárias: constantes iguais às do `run_experiments`; nome seguro; upload (licença obrigatória, formato, duplicado); validação de jobs (caminho, modelo, vocabulário, nome do LLM, confirmação paga); cancelamento; etapa e progresso pelo log; plano de experimentos (pulo pelo `raw.csv`, `-semfiltro`, aquecimento); agregação dos resultados (duplicata vale a última); trecho e gabarito (cache apagado, avisos); alinhamento e marcações de erro (inclusive desatualizadas); A/B e áudio. Pulado sem o extra `gui` |
 | `tests/test_summarize.py` | `extract_topics`; capítulos; backend desconhecido; requisição ao Ollama (simulada); requisição ao Claude com o SDK real e transporte HTTP simulado (fallback, streaming, custo) |
+| `tests/test_extract.py` (ampliado) | + layout em painel: a regressão do defeito do D14 (painel de ~51% do quadro e mediana oscilando), câmera em tela cheia com `roi`, `panel_from_frames` (moldura, tela cheia, faixa de título, só câmera), `find_panel` e `slides` com `panel.json` e `panel="off"` |
+| `tests/test_context.py`, `test_context_fix.py`, `test_context_stt.py` | Glossário (siglas, nomes, números, caixa alta, boilerplate), plano de intervalos, hotwords e placebo; as três regras da correção, o que **não** muda e os achados do teste real; os seis modos com um ASR falso (nenhuma palavra perdida ou repetida na fronteira) |
+| `tests/test_ocr.py`, `test_stt_ctx.py` | Recorte, pré-processamento e leitura da saída do Tesseract e do EasyOCR (sem os motores; o teste com o Tesseract é pulado sem ele); fallback de CPU sem cuBLAS, `transcribe_array` e `hotwords` com um modelo falso |
+| `tests/test_run_context.py`, `test_pipeline_ctx.py` | `run_experiments --context` ponta a ponta com arquivos temporários (condições, métricas, retomada, `--redo`); `pipeline.process` com contexto, sem Tesseract, o padrão inalterado e `--ocr` |
+| `tests/test_report_ctx.py`, `test_calibration.py`, `test_context_audit.py`, `test_eval_slides.py` | Tabelas 6 e 7 e figuras 5 a 7 (e o relatório só com a RQ1); calibração e ECE; consolidação da auditoria; avaliador de slides |
+| `tests/test_studio.py` (ampliado) | + jobs com contexto, plano e início dos experimentos de contexto, resultados separados, Erros e A/B com condições `@`, a auditoria das correções de ponta a ponta |
 
 Regras: testes sem rede e sem carregar modelo do Whisper ou do EasyOCR.
 
@@ -590,13 +749,20 @@ Regras: testes sem rede e sem carregar modelo do Whisper ou do EasyOCR.
 | Adicionar uma aula | `data/raw/` (com licença anotada no README), gabarito em `data/gt/`, linha em `clips.csv` |
 | Trocar o LLM local | `--llm-model` (e `ollama pull`), ou `summarize.DEFAULT_MODELS` |
 | Criar a busca da F6 | `data/gt/consultas.json` ⏳ e `metrics` (`precision_at_k`, `mrr`) |
+| Mudar os limiares do painel ou do rastreio de slides | `extract.PANEL_*`, `SlideTracker`; conferir com `--trace`, `eval_slides.py` e as imagens. Registrar em `docs/decisoes.md` |
+| Adicionar um modo de contexto | `context_stt.MODES` e `transcribe_context`, `run_experiments.CONTEXTS` e `studio.CONTEXTS` (um teste confere), `report.CTX_ORDER` e a seção 5.5 |
+| Adicionar uma regra de correção | `context_fix` (uma função `_rN` e uma linha em `fix_segments`), com teste do par real **e** do que não pode mudar |
+| Trocar o motor de OCR | `ocr.py` (uma função com a interface de `ocr_tesseract`) e `ocr.MOTORES` |
 
 ---
 
 ## 10. O que ainda não existe
 
-- `src/ocr.py` e a RQ2 (etapa 3).
+- A RQ2 (matriz de OCR: motor × degradação) e o `ocr.py` exercitado com o Tesseract e o EasyOCR reais (o Tesseract `por` não está instalado no host; o EasyOCR não está nas dependências).
 - Vídeos com licença, gabaritos, `clips.csv` e `results/raw.csv` reais (etapa 1).
 - Modelo SBC do artigo (pendência 4 do CLAUDE.md).
 - F6 (consultas e métricas de busca), F7 (ablação) e F8 (HLS).
 - Backup gravado da demo.
+- F10 com dado real: vídeos com licença, gabarito de fala, `terms.txt` e glossários (etapa 1); as auditorias (tela Correções) e o gabarito parcial de termos; a matriz da camada B e a calibração dos limiares (`tau`, `s_min`, margem...). O teste de `initial_prompt` × `hotwords` por janela e a decisão de refazer a I5 (C2).
+- Telas para anotar o gabarito de tempo dos slides e o de termos (hoje, editar `data/gt/`), e a auditoria às cegas das **diferenças** entre dois sistemas (win-rate; plano, seção 7).
+- O modo R (re-decodificação seletiva) e a correção da fala sobre o OCR (RQ9): fora desta entrega.

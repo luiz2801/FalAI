@@ -17,3 +17,6 @@ __pycache__
 .pytest_cache
 .ruff_cache
 .git
+
+# Vídeos de teste locais (curso comercial, sem licença): fora do contexto de build
+economia do dia cb

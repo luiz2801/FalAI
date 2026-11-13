@@ -24,3 +24,6 @@ web/data/
 
 # Cópias embaralhadas para os avaliadores (a chave e as notas ficam versionadas)
 results/eval/blind/
+
+# Vídeos de teste locais (curso comercial, sem licença): nunca vão para o git (CLAUDE.md, regra 4)
+economia do dia cb/
