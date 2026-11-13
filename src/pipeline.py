@@ -2,6 +2,7 @@
 
     python src/pipeline.py data/raw/aula01.mp4 --model small
     python src/pipeline.py data/raw/aula01.mp4 --model small --summary ollama
+    python src/pipeline.py data/raw/aula01.mp4 --model small --context L+F    # F10: o slide guia o STT (exige Tesseract)
     cd web && python -m http.server        # abrir http://localhost:8000
 
 Saídas: data/derived/<video>/ (transcrição, keyframes, resumo) e web/data/<video>/ (cópias para a
@@ -24,24 +25,72 @@ DERIVED, WEB = ROOT / "data" / "derived", ROOT / "web"
 
 def process(video: str | Path, model: str = "small", device: str = "auto", vocab: str | None = None,
             summary: str | None = None, llm_model: str | None = None, step_s: float | None = None,
-            thr: float = 0.04, web: bool = True, progress=print, frames_mode: str = "slides") -> dict:
+            thr: float = 0.04, web: bool = True, progress=print, frames_mode: str = "slides",
+            context: str | None = None, ocr: bool = False) -> dict:
+    """context: None | "G" | "L" | "L+F" (F10): o texto dos slides guia o STT (context_stt). Exige o modo de slides
+    e o OCR (Tesseract); sem eles o contexto é pulado, com o motivo, e o STT segue sem ele. ocr=True só preenche o
+    `texto` dos slides (a busca da página), sem contexto. Sem context nem ocr, o comportamento é o de sempre."""
     video = Path(video)
     v = video.stem
     pasta = DERIVED / v
     out: dict = {"video": video}
+    frames_dir = pasta / "frames"
 
-    progress(f"STT ({model})...")
+    glossario = None
+    if (context or ocr) and frames_mode != "slides":
+        progress("OCR e contexto pulados: exigem o modo de slides (--frames-mode slides).")
+        context = None
+        ocr = False
+    if context or ocr:  # F10: os slides vêm antes do STT, porque o glossário alimenta a decodificação
+        import context as ctx
+        import ocr as ocr_mod
+
+        progress("Slides completos...")
+        out["frames"] = extract_slides(video, frames_dir, step_s or 0.5)
+        progress(f"  {len(out['frames'])} slides")
+        if motivo := ocr_mod.status("tesseract"):
+            progress(f"OCR pulado ({motivo}); {'o contexto também' if context else 'seguindo sem texto nos slides'}.")
+            context = None
+        else:
+            progress(f"OCR (tesseract) em {len(out['frames'])} slides...")
+            box = json.loads((frames_dir / "panel.json").read_text(encoding="utf-8")).get("ocr_box")
+            out["frames"] = ocr_mod.ocr_slides(frames_dir, out["frames"], box)
+            glossario = ctx.build_glossary(out["frames"])
+            ctx.save_glossary(pasta / "glossario.json", glossario)
+            (pasta / "ocr.json").write_text(json.dumps({"motor": "tesseract", "psm": 6, "tempo_s": round(
+                sum(f["ocr_tempo_s"] for f in out["frames"]), 3), "slides": out["frames"]}, ensure_ascii=False, indent=2),
+                encoding="utf-8")
+
+    progress(f"STT ({model}{', contexto ' + context if context else ''})...")
     prompt = stt.build_prompt(stt.read_terms(vocab)) if vocab else None
-    segs, dur, tempo = stt.transcribe(video, model, device, initial_prompt=prompt)
-    stem = f"{v}.{model}{'.vocab' if prompt else ''}"
+    meta_ctx: dict = {}
+    if context:
+        import context_stt
+        from extract import load_audio
+
+        audio = load_audio(video)
+        r = context_stt.transcribe_context(audio, context, context_stt.make_asr(model, device), glossario)
+        segs, dur, tempo = r["segs"], len(audio) / context_stt.SR, r["tempo_s"]
+        removed = r["removed"]
+        meta_ctx = {"context": context, "calls": r["n_calls"], "fix": r["fix_summary"], "plan": r["plan"]}
+        out["corrections"] = r["corrections"]
+    else:
+        segs, dur, tempo = stt.transcribe(video, model, device, initial_prompt=prompt)
+        removed = stt.transcribe.last_removed
+    stem = f"{v}.{model}{'.vocab' if prompt else ''}{'.ctx-' + context.replace('+', '') if context else ''}"
     out.update(stt.save_outputs(segs, pasta, stem, {
         "media": str(video), "model": model, "device": stt.resolve_device(device)[0], "initial_prompt": prompt,
-        "duration_s": dur, "time_s": tempo, "removed": stt.transcribe.last_removed}))
+        "duration_s": dur, "time_s": tempo, "removed": removed, **meta_ctx}))
+    if out.get("corrections"):
+        (pasta / f"{stem}.correcoes.jsonl").write_text(
+            "\n".join(json.dumps(c, ensure_ascii=False) for c in out["corrections"]) + "\n", encoding="utf-8")
     out.update(segments=segs, duration_s=dur, time_s=tempo)
-    progress(f"  {dur:.0f} s de áudio em {tempo:.1f} s (RTF {tempo / dur:.3f}), {len(segs)} segmentos")
+    progress(f"  {dur:.0f} s de áudio em {tempo:.1f} s (RTF {tempo / dur:.3f}), {len(segs)} segmentos"
+             + (f", {len(out['corrections'])} correções" if context == "L+F" else ""))
 
-    frames_dir = pasta / "frames"
-    if frames_mode == "slides":  # padrão: um quadro completo por slide (extract.slides)
+    if "frames" in out:  # já calculados (caminho do F10)
+        pass
+    elif frames_mode == "slides":  # padrão: um quadro completo por slide (extract.slides)
         progress("Slides completos...")
         out["frames"] = extract_slides(video, frames_dir, step_s or 0.5)
         progress(f"  {len(out['frames'])} slides")
@@ -115,9 +164,14 @@ def main():
                     help="slides: quadro completo de cada slide (padrão); diff: baseline por diferença de quadros")
     ap.add_argument("--step-s", type=float, help="intervalo de amostragem (padrão: 0,5 s em slides, 1,0 s em diff)")
     ap.add_argument("--thr", type=float, default=0.04, help="só no modo diff")
+    ap.add_argument("--context", choices=["G", "L", "L+F"],
+                    help="F10: o texto dos slides (OCR) guia o STT. G: vocabulário do vídeo; L: o do slide visível; "
+                         "L+F: o L e a correção de siglas e nomes. Exige o Tesseract")
+    ap.add_argument("--ocr", action="store_true", help="só preenche o texto dos slides (a busca da página); sem contexto")
     ap.add_argument("--no-web", action="store_true")
     a = ap.parse_args()
-    process(a.video, a.model, a.device, a.vocab, a.summary, a.llm_model, a.step_s, a.thr, not a.no_web, frames_mode=a.frames_mode)
+    process(a.video, a.model, a.device, a.vocab, a.summary, a.llm_model, a.step_s, a.thr, not a.no_web,
+            frames_mode=a.frames_mode, context=a.context, ocr=a.ocr)
 
 
 if __name__ == "__main__":
