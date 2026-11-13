@@ -87,7 +87,7 @@ def table1_wer(stt: pd.DataFrame) -> None:
 
 
 def table3_time(stt: pd.DataFrame) -> None:
-    w = stt[stt.metrica_erro == "wer"].copy()
+    w = stt[(stt.metrica_erro == "wer") & ~stt.condicao.str.contains("@", na=False)].copy()  # só a RQ1
     if w.empty:
         return
     w["s_por_min"] = w.tempo_s / (w.duracao_s / 60)
@@ -160,6 +160,143 @@ def fig_vocab(stt: pd.DataFrame) -> None:
     _save_fig(fig, "fig3_termos_vocabulario")
 
 
+# ------------------------------------------------------------------ F10: o slide como contexto (RQ6 a RQ8)
+CTX_ORDER = ["B0", "G", "P", "L", "L+F", "O"]
+CTX_LABEL = {"B0": "sem contexto", "G": "global", "P": "placebo", "L": "local", "L+F": "local + correção",
+             "O": "oráculo"}
+
+
+def _ctx(stt: pd.DataFrame) -> pd.DataFrame:
+    """Linhas de contexto (condição `<ruído>@<modo>`), com as colunas `ruido` e `modo`."""
+    c = stt[stt.condicao.str.contains("@", na=False)].copy()
+    # as colunas existem mesmo sem nenhuma linha de contexto: o relatório de hoje (só RQ1) não pode quebrar
+    c["ruido"] = c.condicao.str.split("@", n=1).str[0]
+    c["modo"] = c.condicao.str.split("@", n=1).str[1]
+    return c
+
+
+def table6_context(stt: pd.DataFrame) -> None:
+    """Média ± desvio (n) de cada métrica por modelo × ruído × modo de contexto."""
+    c = _ctx(stt)
+    c = c[c.metrica_erro.isin(["wer", "acerto_termos_slide", "acerto_termos_fora", "falsos_positivos",
+                               "taxa_alteracao", "precisao_correcoes"])]
+    if c.empty:
+        return
+    t = c.groupby(["modelo", "ruido", "metrica_erro", "modo"])["valor_erro"].apply(_mean_sd).unstack("modo")
+    t = t.reindex(columns=[m for m in CTX_ORDER if m in t.columns])
+    _save_table(t, "tabela6_contexto")
+
+
+def table7_context_cost(stt: pd.DataFrame) -> None:
+    """Custo do contexto: RTF da inferência por modo, ΔRTF contra o B0 e, somado, o do OCR e do glossário
+    (linhas `tempo_ctx`, RTF sobre o vídeo inteiro: média dos vídeos)."""
+    c = _ctx(stt)
+    w = c[c.metrica_erro == "wer"]
+    if w.empty or "B0" not in set(w.modo):
+        return
+    rtf = w.groupby(["modelo", "ruido", "modo"])["rtf"].mean().unstack("modo")
+    ocr = stt[stt.metrica_erro == "tempo_ctx"]["rtf"].mean()
+    linhas = {}
+    for (modelo, ruido), r in rtf.iterrows():
+        for modo in [m for m in CTX_ORDER if m in r.index and pd.notna(r[m])]:
+            delta = r[modo] - r["B0"]
+            usa_slide = modo not in ("B0", "O")  # o oráculo usa o terms.txt humano, sem OCR
+            linhas[(modelo, ruido, modo)] = {
+                "rtf_inferencia": round(r[modo], 4), "delta_rtf_inferencia": round(delta, 4),
+                "rtf_ocr_glossario": round(ocr, 4) if usa_slide and pd.notna(ocr) else None,
+                "delta_rtf_total": round(delta + (ocr if usa_slide and pd.notna(ocr) else 0.0), 4)}
+    t = pd.DataFrame.from_dict(linhas, orient="index")
+    t.index = pd.MultiIndex.from_tuples(t.index, names=["modelo", "ruido", "modo"])
+    _save_table(t, "tabela7_custo_contexto")
+
+
+def fig5_context_gain_snr(stt: pd.DataFrame) -> None:
+    """RQ7: o ganho de acerto de termos do slide (L menos B0, em pontos percentuais) cai ou cresce com o ruído?"""
+    c = _ctx(stt)
+    a = c[c.metrica_erro == "acerto_termos_slide"]
+    if a.empty or not {"B0", "L"} <= set(a.modo):
+        return
+    p = a.pivot_table(index=["modelo", "ruido", "video", "repeticao"], columns="modo", values="valor_erro")
+    p["ganho"] = (p["L"] - p["B0"]) * 100
+    g = p.dropna(subset=["ganho"]).groupby(["modelo", "ruido"])["ganho"].agg(["mean", "std", "count"])
+    conds = [x for x in COND_ORDER if x in set(g.index.get_level_values("ruido"))]
+    if len(conds) < 2:
+        return
+    fig, ax = plt.subplots()
+    ax.axhline(0, color=INK_2, lw=1, zorder=1)
+    for k, m in enumerate(_models(g.index.get_level_values("modelo"))[:len(SERIES)]):
+        d = g.loc[m].reindex(conds)
+        ax.errorbar(range(len(conds)), d["mean"], yerr=d["std"].fillna(0), color=SERIES[k], lw=2, marker="o", ms=8,
+                    mec=SURFACE, mew=2, elinewidth=1, capsize=3, label=m, zorder=3)
+    ax.set_xticks(range(len(conds)), [COND_LABEL[x] for x in conds])
+    ax.set_xlabel("Condição do áudio (SNR do ruído branco)")
+    ax.set_ylabel("Ganho em termos do slide, L − B0 (pontos %)")
+    ax.set_title("O contexto do slide ajuda mais com ruído?")
+    ax.legend(loc="best", fontsize=8)
+    _save_fig(fig, "fig5_ganho_termos_snr")
+
+
+def fig7_placebo(stt: pd.DataFrame) -> None:
+    """RQ6: acerto dos termos do slide, áudio limpo, por modo. O placebo separa "o slide ajuda" de "qualquer
+    prompt muda a saída"; o oráculo (linha tracejada) é o teto."""
+    c = _ctx(stt)
+    a = c[(c.metrica_erro == "acerto_termos_slide") & (c.ruido == "limpo")]
+    modos = [m for m in ["B0", "P", "G", "L", "L+F"] if m in set(a.modo)]
+    if len(modos) < 2:
+        return
+    t = a.groupby(["modelo", "modo"])["valor_erro"].mean().unstack("modo").reindex(columns=modos) * 100
+    ordem = _models(t.index)
+    t = t.reindex(ordem)
+    teto = a[a.modo == "O"].groupby("modelo")["valor_erro"].mean() * 100
+    fig, ax = plt.subplots()
+    w = 0.8 / len(modos)
+    for k, modo in enumerate(modos):
+        xs = [i + (k - (len(modos) - 1) / 2) * w for i in range(len(ordem))]
+        ax.bar(xs, t[modo].values, width=w * 0.92, color=SERIES[k], hatch="//" if modo == "P" else None,
+               label=CTX_LABEL[modo], zorder=2)
+        for xi, v in zip(xs, t[modo].values, strict=True):
+            ax.annotate(f"{v:.0f}", (xi, v), xytext=(0, 3), textcoords="offset points", ha="center", va="bottom",
+                        fontsize=7)
+    for i, m in enumerate(ordem):
+        if m in teto.index:
+            ax.hlines(teto[m], i - 0.42, i + 0.42, color=INK, lw=1.2, ls="--", zorder=4,
+                      label="oráculo" if i == 0 else None)
+    ax.set_xticks(range(len(ordem)), ordem)
+    ax.set_ylim(0, 112)
+    ax.set_ylabel("Termos do slide reconhecidos (%)")
+    ax.set_title("O slide ajuda, ou qualquer prompt ajudaria?")
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.12), ncols=3, fontsize=8)
+    _save_fig(fig, "fig7_placebo")
+
+
+def fig6_calibration() -> None:
+    """Subproduto: a probabilidade que o Whisper dá a cada palavra prevê que ela está certa? Lê
+    results/calibracao.csv (src/calibration.py)."""
+    arq = RESULTS / "calibracao.csv"
+    if not arq.exists():
+        return
+    c = pd.read_csv(arq)
+    c = c[c.n > 0]
+    if c.empty:
+        return
+    fig, ax = plt.subplots(figsize=(4.4, 4.2))
+    ax.plot([0, 100], [0, 100], color=INK_2, lw=1, ls="--", zorder=1, label="calibração perfeita")
+    for k, m in enumerate(_models(c.modelo)[:len(SERIES)]):
+        d = c[c.modelo == m].groupby("bin_lo").apply(
+            lambda g: pd.Series({"conf": (g.conf_media * g.n).sum() / g.n.sum(), "acerto": (g.acerto * g.n).sum() / g.n.sum()}),
+            include_groups=False)
+        ax.plot(d.conf * 100, d.acerto * 100, color=SERIES[k], lw=2, marker="o", ms=6, mec=SURFACE, mew=1.5, label=m,
+                zorder=3)
+    ax.set_xlim(0, 100)
+    ax.set_ylim(0, 100)
+    ax.set_xlabel("Probabilidade média da palavra (%)")
+    ax.set_ylabel("Palavras certas (%)")
+    ax.grid(axis="x", color=GRID, lw=0.8)
+    ax.set_title("A confiança do Whisper é calibrada?")
+    ax.legend(loc="upper left", fontsize=8)
+    _save_fig(fig, "fig6_calibracao_confianca")
+
+
 # ------------------------------------------------------------------ análise de erros (regra 11)
 def table5_errors() -> None:
     """Erros classificados à mão no FalAI Studio (results/erros.csv): contagem por modelo × categoria."""
@@ -228,6 +365,11 @@ def main():
     fig1_wer_snr(stt_df)
     fig2_rtf_wer(stt_df)
     fig_vocab(stt_df)
+    table6_context(stt_df)
+    table7_context_cost(stt_df)
+    fig5_context_gain_snr(stt_df)
+    fig7_placebo(stt_df)
+    fig6_calibration()
     summaries(df)
     table5_errors()
 

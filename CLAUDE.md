@@ -59,6 +59,7 @@ Perguntas secundárias:
 
 - Só se a F9 entrar `[DECIDIDO]` (docs/decisoes.md, D1): o erro do STT piora o resumo gerado por LLM? Um modelo de STT menor produz resumos equivalentes aos de um maior?
 - Só se a F8 entrar: quanto o processamento de IA afeta a entrega em streaming?
+- Só se a F10 entrar `[PREMISSA]` (docs/plano_contexto_cruzado.md): o texto do slide que está na tela melhora a transcrição dos termos técnicos (siglas, nomes)? O ganho cresce com o ruído? A fusão tolera um OCR ruim?
 
 **Título provisório** `[PENDENTE]` aprovação do professor: *Análise inteligente de vídeos de aula: transcrição, OCR e indexação multimodal com avaliação de qualidade e custo computacional.*
 
@@ -67,6 +68,7 @@ Perguntas secundárias:
 - **Obrigatório (MVP):** F1 a F5.
 - **Desejável:** F6 (busca com Precision@k e MRR) e F7 (ablação da taxa de keyframes).
 - **Opcional, cortar primeiro se faltar tempo:** F8 (HLS com e sem IA em paralelo) e F9 (resumo por LLM).
+- **Opcional (F10, `[PREMISSA]`):** o slide como contexto do STT (o texto do slide guia o Whisper; correção de siglas e nomes com auditoria; RQ6 a RQ8). Código e testes prontos; plano em [docs/plano_contexto_cruzado.md](docs/plano_contexto_cruzado.md), decisões D14 a D20 em `docs/decisoes.md`. Não cortar a Fase 1 do plano (slides em layout de painel): o OCR da etapa 3 depende dela.
 - **Fora do escopo:** otimização de rede e transporte (é o Tema 5), treino ou ajuste fino de modelos, uso multiusuário ou em produção.
 
 **Fronteira análise × transporte.** O enunciado pede que o trabalho diferencie análise/produção de mídia do transporte pela rede. O projeto separa dois planos (seção 8 e `guia.md`, seção 2): o plano de conteúdo (IA, offline) e o plano de entrega (HLS, medido separadamente). Essa fronteira aparece na introdução do artigo e no diagrama de arquitetura.
@@ -114,6 +116,7 @@ Pesos: implementação 5,0; artigo técnico 3,0; defesa 2,0.
 | 15 | Equipe | Divisão de papéis do planejamento, seção 9 (3 ou 4 integrantes). Nomes não definidos | `[PENDENTE]` |
 | 16 | Repositório | <https://github.com/luiz2801/FalAI> (público) | `[DECIDIDO]` |
 | 17 | Filtro de alucinações do STT | Ligado por padrão; `--no-clean` para comparar (docs/decisoes.md) | `[PREMISSA]` muda o WER: revisar com a equipe |
+| 18 | O slide como contexto (F10) | O texto do slide (OCR) entra como `hotwords` do Whisper, trecho a trecho; siglas e nomes de baixa confiança são corrigidos com o termo do slide visível, com auditoria humana. Controles: placebo e oráculo. Os vídeos de teste locais, sem licença, ficam fora do dataset | `[PREMISSA]` docs/decisoes.md, D14 a D20. **Pendente C2:** refazer a I5 com `hotwords` (hoje o `initial_prompt` só vale na 1ª janela) |
 
 ---
 
@@ -136,8 +139,11 @@ Pesos: implementação 5,0; artigo técnico 3,0; defesa 2,0.
 | RQ3 | Busca (F6) | 20 a 30 consultas com trechos relevantes marcados | — | Precision@5, Recall@5, MRR |
 | RQ4 | Entrega HLS (F8) | Com e sem o pipeline de IA em paralelo | — | Tempo de início, buffering, bitrate, tamanho dos metadados |
 | RQ5 | Resumo por LLM (F9) | Modelos de STT × LLM, 2 repetições (não determinismo) | — | Nota (1 a 5, às cegas), fidelidade, cobertura, precisão dos timestamps (±30 s), custo, tempo |
+| RQ6 | O slide como contexto (F10) | 3 modelos × 4 condições × contexto (B0, G, P, L, L+F; O) × 6 trechos | 360 (+ 36 do oráculo) | WER, acerto de termos do slide e fora dele, falsos positivos, ΔRTF, precisão das correções |
+| RQ7 | O ganho do contexto cresce com o ruído? | A RQ6 em limpo, 20, 10 e 0 dB | — | Ganho de termos do slide × SNR |
+| RQ8 | A fusão tolera OCR ruim? | A RQ6 com as degradações da RQ2 | — | As da RQ6, com OCR degradado. **Ainda sem automação** (guia, seção 10) |
 
-Extra da RQ1 (I5): condição `limpo_vocab`, com o vocabulário da disciplina no `initial_prompt`; métrica `acerto_termos`.
+Extra da RQ1 (I5): condição `limpo_vocab`, com o vocabulário da disciplina no `initial_prompt`; métrica `acerto_termos`. Atenção: com `condition_on_previous_text=False` o `initial_prompt` só vale na 1ª janela do Whisper (guia, 7.5, item 25); a F10 usa `hotwords`.
 
 Ablação (F7): taxa de keyframes (`step_s`) e limiar de troca de slide (`thr`), com efeito no recall de slides e no tempo.
 
@@ -194,7 +200,7 @@ tema9/
 ├── src/                       # código (ver guia.md, seção 4)
 │   ├── extract.py
 │   ├── stt.py
-│   ├── ocr.py                 # ⏳ etapa 3
+│   ├── ocr.py                 # etapa 3 (código pronto; falta o Tesseract no host)
 │   ├── degrade.py
 │   ├── metrics.py
 │   ├── summarize.py           # F9
@@ -202,7 +208,13 @@ tema9/
 │   ├── pipeline.py            # um vídeo de ponta a ponta + demo
 │   ├── run_experiments.py
 │   ├── report.py
-│   └── studio.py              # FalAI Studio: GUI de trabalho (guia.md, 4.10)
+│   ├── studio.py              # FalAI Studio: GUI de trabalho (guia.md, 4.10)
+│   ├── context.py             # F10: glossário por slide e plano de intervalos
+│   ├── context_stt.py         # F10: STT com o slide como contexto (B0, G, P, L, L+F, O)
+│   ├── context_fix.py         # F10: correção de siglas e nomes com gate
+│   ├── context_audit.py       # F10: auditoria das correções -> raw.csv
+│   ├── calibration.py         # F10: calibração da confiança do Whisper
+│   └── eval_slides.py         # F10: extrator de slides × gabarito de tempo
 ├── tests/                     # testes de fumaça e unitários
 ├── data/
 │   ├── raw/                   # vídeos originais (fora do git)
@@ -229,6 +241,8 @@ Os arquivos de planejamento ficam uma pasta acima, em `redes multimidia/`, e nã
 - **Trechos** (`data/gt/clips.csv`): início e duração do trecho com gabarito de cada vídeo. Comece o trecho no início de uma frase: cortes no meio da frase fazem o Whisper apagar o começo (guia.md, armadilha 21).
 - **Tópicos reais** (`data/gt/<video>.topics.txt`, só para a F9): anotados à mão ao assistir.
 - **Vocabulário** (`data/gt/terms.txt`, opcional, I5): termos técnicos que aparecem nos trechos.
+- **Gabarito de tempo dos slides** (`data/gt/<video>.slides_t.json`, F10): início e "slide completo" de cada slide, anotados vendo o vídeo (`src/eval_slides.py`).
+- **Termos falados** (`data/gt/<video>.termos.tsv`, F10, só no banco de testes): `t_s<TAB>termo` por ocorrência, anotado **ouvindo** o áudio.
 - **Formatos de cada arquivo**: `guia.md`, seção 5.
 
 Divergência conhecida: o gabarito de slides e a saída do OCR usam chaves diferentes no guia de implementação (`text` e `texto`). Decida uma antes da etapa 3 (ver `guia.md`, seção 5).
