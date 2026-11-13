@@ -1,6 +1,6 @@
 # guia.md — Mapa do projeto Tema 9
 
-**Versão 0.4 — 2026-11-12**
+**Versão 0.4.1 — 2026-11-13**
 
 > Complementa o [CLAUDE.md](CLAUDE.md) (regras, decisões e roadmap). Descreve **o que existe hoje** e o contrato de cada módulo, para não precisar reler o código inteiro. O que está marcado com ⏳ é planejado.
 > Os detalhes de cada etapa (com trechos de código) estão no [guia de implementação](../Tema09_MVP_Guia_de_Implementacao.md), fora do repositório.
@@ -15,6 +15,8 @@
 >
 > Este guia é uma foto do estado atual. Histórico de decisões vai em [docs/decisoes.md](docs/decisoes.md).
 
+**Mudanças da 0.4.1:** execução independente de hardware: seção 3.0 (como rodar em qualquer máquina, `--device`), ambiente verificado reescrito como registro, `docker-compose.yml` em CPU e override `docker-compose.gpu.yml` (D21). Sem mudança no código Python.
+
 **Mudanças da 0.4 (F10, o slide como contexto; [docs/plano_contexto_cruzado.md](docs/plano_contexto_cruzado.md), decisões D14 a D20 em [docs/decisoes.md](docs/decisoes.md)):** `extract.slides` acha o painel do slide (`panel="auto"`, `panel.json`) e mede a mediana e o fundo liso dentro da ROI; `ocr.py` (Tesseract e EasyOCR opcional); `context.py` (glossário por slide e plano de intervalos), `context_stt.py` (modos B0, G, P, L, L+F e O), `context_fix.py` (correção com gate), `context_audit.py`, `calibration.py` e `eval_slides.py`; `stt.transcribe_array` e `hotwords`; `resolve_device` cai para CPU sem cuBLAS; `run_experiments.py --context` e `pipeline.py --context/--ocr`; tabelas 6 e 7 e figuras 5 a 7 no `report.py`; no Studio, a tela Correções e o contexto nas demais telas. Contrato do `raw.csv` ampliado (5.5) e arquivos novos (5.12 a 5.17).
 
 **Mudanças da 0.3:** CLI `python src/extract.py <vídeo>` e seções 3.1 (como rodar) e 3.2 (como rodar no Docker); `extract.slides()` e `SlideTracker` (um quadro completo por slide, mesmo com bullets revelados aos poucos); `frames.json` ganha `t_complete`, `t_end`, `n_stages` e `visits`; `pipeline.py` ganha `--frames-mode` (padrão `slides`; `diff` é o baseline antigo). Detalhes em docs/decisoes.md (2026-11-12).
@@ -27,7 +29,7 @@
 
 | Etapa | Módulos | Estado |
 |---|---|---|
-| 0. Ambiente | `pyproject.toml`, `uv.lock`, `.python-version`, `Dockerfile`, `docker-compose.yml`, `.dockerignore`, `README.md`, `.gitignore`, `tests/test_smoke.py` | 🟡 build OK no contêiner; falta o NVIDIA Container Toolkit (teste de GPU) e o Tesseract `por` no host |
+| 0. Ambiente | `pyproject.toml`, `uv.lock`, `.python-version`, `Dockerfile`, `docker-compose.yml`, `.dockerignore`, `README.md`, `.gitignore`, `tests/test_smoke.py` | 🟡 build OK no contêiner; roda em CPU ou GPU (3.0). Falta o Tesseract `por` nas máquinas de execução e o teste de GPU com o NVIDIA Container Toolkit |
 | 1. Dataset e gabarito | `data/raw/`, `data/gt/` | ⏳ depende de licença e de transcrição manual. Há exemplos de formato em `data/gt/*.example.*` |
 | 2. STT (F1, parte de F3 e F4) | `extract.py` (áudio), `stt.py`, `degrade.py` (ruído), `metrics.py` | ✅ código e testes. Testado de ponta a ponta com um vídeo e gabarito temporários, apagados depois |
 | 3. OCR (F2, parte de F3 e F4) | `extract.slides` ✅, `extract.keyframes` ✅ (baseline), `degrade.degrade_image` ✅, `ocr.py` ✅ (código), `metrics.word_pr` ✅ | 🟡 `ocr.py` testado com dublês (o teste com texto sintético é pulado: o Tesseract `por` não está instalado no host); falta a RQ2 (matriz de OCR por motor × degradação) |
@@ -41,18 +43,20 @@
 
 ### Ambiente verificado
 
-| Item | Máquina principal (guia de implementação, §1.1) | Notebook usado na junção (2026-11-11) |
+O código **não depende de um hardware específico** (ver 3.0). A tabela abaixo é um registro das máquinas em que o projeto já rodou, não um requisito.
+
+| Item | Máquina A (desktop com GPU) | Máquina B (notebook, junção em 2026-11-11) |
 |---|---|---|
 | Python | 3.14.8 instalado. **Usar 3.12** via `uv` | 3.14.10; 3.12.13 via `uv` |
 | FFmpeg | 9.0.2 | instalado |
 | Tesseract | **não instalado** | instalado, **sem** `por` |
-| GPU | RTX 3060, 12 GB | nenhuma (CPU, `int8`) |
+| GPU | NVIDIA RTX 3060, 12 GB | nenhuma (CPU, `int8`) |
 | cuBLAS 12 (`libcublas.so.12`) | **ausente no host em 2026-11-12**: a GPU é vista, mas a inferência falhava; `device="auto"` agora cai para CPU/int8 com um aviso (D17). Resolver: instalar o CUDA 12 ou usar o contêiner | — |
 | CPU e RAM | 24 threads, 62 GB | i7-1260P, 16 threads, 15 GB |
 | Ollama | — | rodando, **sem modelos** baixados |
 | Whisper em cache (`~/.cache/huggingface`) | só o `medium` (2026-11-12); `tiny`, `base` e `small` baixam na 1ª execução | — |
 
-O RTF só é comparável dentro da mesma máquina: rode todos os experimentos na principal e reporte o hardware (`results/hardware.json`, gerado pelo `run_experiments.py`).
+O RTF só é comparável dentro da **mesma configuração de hardware e dispositivo**. Escolha uma máquina e um `--device` para os experimentos do artigo (de preferência explícito, `cpu` ou `cuda`, não `auto`) e reporte o `results/hardware.json`, gerado pelo `run_experiments.py`.
 
 ---
 
@@ -99,6 +103,44 @@ pipeline.py: aulaNN.mp4 ──► transcrição + keyframes (+ resumo) ──►
 ---
 
 ## 3. Comandos
+
+### 3.0 Como rodar em qualquer máquina
+
+**Requisitos.** Linux, macOS ou Windows (WSL2); 4 núcleos e 8 GB de RAM no mínimo; ~5 GB de disco (~15 GB com o `medium`, o Ollama e o contêiner). GPU é opcional: NVIDIA com CUDA 12 e 6 GB de VRAM ou mais acelera `small` e `medium`.
+
+**Escolha do caminho:**
+
+| Situação | Caminho |
+|---|---|
+| Tem `uv` e FFmpeg (ou pode instalar) | Sem contêiner: `uv sync` (README, "Instalação") |
+| Não quer mexer no sistema, ou o SO é outro | Contêiner em CPU (3.2) |
+| Tem GPU NVIDIA | Sem contêiner com CUDA 12 no host, ou contêiner com `docker-compose.gpu.yml` |
+| Sem GPU e sem instalar nada local | Colab ou servidor: clone, `uv sync` e só a linha de comando |
+
+**Dispositivo do STT.** Todos os comandos que transcrevem aceitam `--device auto|cpu|cuda` (`stt.py`, `pipeline.py`, `run_experiments.py`, `context_stt.py`, e o Studio na tela Experimentos):
+
+- `auto` (padrão): CUDA/`float16` se houver GPU **e** `libcublas.so.12`; senão CPU/`int8` (`stt.resolve_device`, D17).
+- `cpu`: sempre CPU/`int8`. `cuda`: força a GPU e falha se não houver o CUDA 12.
+
+**O que depende do hardware e o que não depende:**
+
+| Muda com o hardware | Não muda |
+|---|---|
+| Tempo de inferência e RTF | Modelos, `language`, `beam_size`, `vad_filter`, seeds |
+| `compute_type` (`float16` na GPU, `int8` na CPU), que pode mudar algumas palavras do WER | Normalização, métricas, formato dos arquivos e do `raw.csv` |
+| O que cabe na memória (`medium`, vídeos longos, F9 com LLM local) | Extração de slides, OCR e degradação (só CPU) |
+
+**Consequências para os experimentos:**
+
+1. Fixe um dispositivo para a matriz inteira (`--device cpu` ou `--device cuda`). O `raw.csv` não guarda o dispositivo por linha, e o `hardware.json` registra o que o `auto` escolheria (`device_auto`), **não** o `--device` que você passou e é sobrescrito a cada execução: anote o comando usado junto com o `hardware.json`. Não misture linhas de máquinas diferentes no mesmo `raw.csv` (apague ou arquive `results/raw.csv` ao trocar de máquina).
+2. Sem GPU, rode `tiny`, `base` e `small`; deixe o `medium` para a máquina com GPU, ou aceite o tempo longo. A grade reduzida da F10 está em `docs/plano_contexto_cruzado.md`.
+3. Registre o `results/hardware.json` no artigo (CPU, threads, RAM, GPU, SO, Python). O RTF de máquinas diferentes **não é comparável**.
+4. O WER pode diferir na terceira casa decimal entre `cpu/int8` e `cuda/float16`; trate como parte do ambiente, não como erro.
+5. Confirme o que o `auto` escolheu: `uv run python -c "import sys; sys.path.insert(0,'src'); import stt; print(stt.resolve_device('auto'))"`.
+
+Comandos de sistema (FFmpeg, Tesseract `por`, Docker, NVIDIA Container Toolkit) por distribuição: README, seções "Instalação". O usuário os executa (CLAUDE.md, regra 8).
+
+### Tabela de comandos
 
 | Comando | Faz | Observação |
 |---|---|---|
@@ -222,7 +264,7 @@ Cada mudança de limiar que alterar o resultado deve ir para `docs/decisoes.md` 
 
 ### 3.2 Como rodar no Docker
 
-Útil para quem não tem Python 3.12, `uv` ou FFmpeg na máquina. A imagem traz tudo (CUDA 12.4, FFmpeg, Tesseract com `por`, as dependências fixadas). **A extração de slides não usa GPU**, então não precisa do NVIDIA Container Toolkit.
+Útil para quem não tem Python 3.12, `uv` ou FFmpeg na máquina, ou usa outro sistema operacional. A imagem traz tudo (base CUDA 12.4, FFmpeg, Tesseract com `por`, as dependências fixadas) e **roda em CPU em qualquer máquina**; a GPU é opcional. **A extração de slides e o OCR não usam GPU.**
 
 > **Estado:** os comandos abaixo seguem o `Dockerfile` e o `docker-compose.yml`, mas **não foram executados**. A imagem `falai` ainda não foi construída nesta máquina. Ao testar pela primeira vez, corrija esta seção.
 
@@ -268,9 +310,15 @@ docker compose run --rm -v "$PWD/Financial Acumen for Non-Financial Managers:/vi
 docker compose run --rm pipeline bash        # shell dentro do contêiner
 ```
 
-O serviço reserva a GPU (`deploy.resources.reservations`). **Sem o NVIDIA Container Toolkit, o `compose run` falha** ao iniciar (erro de driver `nvidia`). Nesse caso, use o `docker run` do passo 3, ou instale o toolkit (README, "Em contêiner").
+O `docker-compose.yml` **não reserva GPU**: roda em CPU em qualquer máquina. Para usar uma GPU NVIDIA (exige o NVIDIA Container Toolkit no host, README, "Em contêiner"), some o override:
 
-**5. Pipeline completo no contêiner** (STT + slides + página). Aqui a GPU ajuda, e o `docker run` precisa de `--gpus all`:
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml run --rm pipeline python src/pipeline.py data/raw/aula01.mp4 --model small --device cuda
+```
+
+Sem o toolkit, esse override falha ao iniciar (erro de driver `nvidia`); use o arquivo base.
+
+**5. Pipeline completo no contêiner** (STT + slides + página). Em CPU, tire o `--gpus all` (o `--device auto` cai para CPU). Com GPU NVIDIA, o `docker run` precisa de `--gpus all`:
 
 ```bash
 docker run --rm --gpus all --user "$(id -u):$(id -g)" -e HOME=/tmp \
@@ -287,14 +335,14 @@ O `web/` também precisa ser montado, porque o pipeline grava a demo em `web/dat
 
 | Sintoma | Causa | Solução |
 |---|---|---|
-| `could not select device driver "nvidia"` | Sem NVIDIA Container Toolkit e usando `compose run` ou `--gpus` | Use `docker run` sem `--gpus` (slides não precisam), ou instale o toolkit |
+| `could not select device driver "nvidia"` | Sem NVIDIA Container Toolkit e usando `docker-compose.gpu.yml` ou `--gpus` | Use o `docker-compose.yml` sozinho ou `docker run` sem `--gpus` (roda em CPU), ou instale o toolkit |
 | `permission denied` ao gravar em `data/` | Faltou `--user "$(id -u):$(id -g)"`, ou uma execução anterior criou a pasta como `root` | Passe `--user`; corrija o dono da pasta (`sudo chown -R $USER data`) |
 | `OpenCV não abriu <vídeo>` | O caminho está errado *dentro* do contêiner | Use o caminho do contêiner (`/videos/...`, `data/raw/...`), não o do host |
 | Mudei o código e nada mudou | `src/` não foi montado | Inclua `-v "$PWD/src:/app/src:ro"` |
 
 ### 3.3 Como rodar o F10 (o slide como contexto)
 
-Plano e justificativa: [docs/plano_contexto_cruzado.md](docs/plano_contexto_cruzado.md). Pré-requisitos: o **Tesseract com o idioma `por`** (`sudo pacman -S tesseract tesseract-data-por`; o usuário executa) e, para a velocidade, a GPU funcionando (sem cuBLAS o `auto` cai para CPU).
+Plano e justificativa: [docs/plano_contexto_cruzado.md](docs/plano_contexto_cruzado.md). Pré-requisitos: o **Tesseract com o idioma `por`** (comando de sistema por distribuição no README, "Instalação"; o usuário executa) e, opcionalmente, uma GPU NVIDIA com CUDA 12 para ganhar velocidade (sem ela, ou sem cuBLAS, o `auto` cai para CPU/`int8`; ver 3.0).
 
 **1. Glossário de cada vídeo** (slides com painel, OCR e glossário):
 
@@ -627,12 +675,12 @@ Todos valem igual para todos os modelos e motores de uma mesma comparação.
 | `condition_on_previous_text` | `False` | `stt.transcribe` | `[PREMISSA]` reduz loops |
 | `word_timestamps` | `True` | `stt.transcribe` | Necessário para a legenda; entra no tempo |
 | Filtro de alucinações | ligado | `stt.clean_segments` | `[PREMISSA]` muda o WER; `--no-clean` para comparar |
-| Dispositivo STT | `auto`: `cuda`/`float16`, senão `cpu`/`int8` | `stt.resolve_device` | Usar a mesma escolha em todos os experimentos |
+| Dispositivo STT | `auto`: `cuda`/`float16` se houver GPU NVIDIA e cuBLAS 12, senão `cpu`/`int8`. `--device cpu` ou `cuda` força | `stt.resolve_device` | Usar a mesma escolha (e a mesma máquina) em todos os experimentos; ver 3.0 |
 | Modelos STT | `tiny`, `base`, `small` (`medium` se couber) | RQ1 | |
 | `initial_prompt` | até ~600 caracteres | `stt.build_prompt` | Só na condição `limpo_vocab` |
 | Legenda | 42 caracteres × 2 linhas, até 7 s | `stt.subtitle_blocks` | |
 | Tesseract | `lang="por"`, `--psm 6` | `ocr.ocr_tesseract` ⏳ | Testar `--psm 3` |
-| EasyOCR | `["pt"]`, `gpu=True` | `ocr.py` ⏳ | Ver armadilha 7.2.1 |
+| EasyOCR | `["pt"]`, `gpu=True` (o EasyOCR cai para CPU, com um aviso, se não houver CUDA) | `ocr.py` | Ver armadilha 7.2.1 |
 | `step_s` (slides) | 0,5 s | `extract.slides` | Ablação F7 |
 | `keep_thr`, `grow_eps`, `min_stable`, `min_slide_s`, `max_ink`, `min_flat` (slides) | 0,9; 0,01; 2; 2,0 s; 0,30; 0,35 | `extract.SlideTracker` | `[PREMISSA]` sem calibração em vídeo real ainda. Ablação F7 |
 | `step_s` (keyframes, baseline) | 1,0 s | `extract.keyframes` | |

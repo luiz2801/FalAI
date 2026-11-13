@@ -121,3 +121,10 @@ Um trecho de 3 min (95 a 275 s) do vídeo `VP`, em que o slide "CMN" mostra "BAC
 - O **placebo mudou mais texto (8,4%) que o contexto real (6,2%)** e introduziu um "CMR": qualquer prompt mexe na saída, e só o real mexe na direção certa. É o motivo do controle.
 - Os tempos (RTF 0,29 sem contexto e 0,58 a 0,59 com ele) **não são comparáveis**: a máquina tinha outras tarefas rodando. O ΔRTF só vale medido com a máquina livre.
 - A **correção** aplicada ao B0 real fez uma troca, `Bassé → BACEN` (p = 0,42, semelhança 1,0). Antes de o `context_fix` ser corrigido, ele fazia outra troca, errada, `a composição → Composição` (apagava o artigo), e deixava passar o "bassé" (a nasal sem consoante). Os dois defeitos estão cobertos por testes (D16).
+
+## 2026-11-13 — Documentação independente de hardware
+
+| # | Decisão | Status |
+|---|---|---|
+| D21 | A documentação deixa de supor a RTX 3060. Requisitos genéricos (4 núcleos, 8 GB, GPU opcional), escolha do dispositivo por `--device auto/cpu/cuda` e instalação por distribuição (README, `guia.md` 3.0). As máquinas usadas viram um registro em `guia.md` §1. O `docker-compose.yml` deixa de reservar a GPU e roda em CPU; a reserva foi para o override opcional `docker-compose.gpu.yml`. Muda a decisão 8 (execução) e a 14 (hardware) do CLAUDE.md. **Código Python e saídas não mudaram.** | `[PREMISSA]` reversível. Pedido do usuário |
+| D22 | **Lacuna conhecida, não corrigida:** `results/hardware.json` registra o `device_auto` (o que o `auto` escolheria) e é sobrescrito a cada execução, e o `raw.csv` não tem coluna de dispositivo. Rodar com `--device cpu` numa máquina com GPU grava `device_auto: cuda`. Sugestão: gravar o `--device` efetivo e o `compute_type` (muda o contrato de arquivo: pede aval, regra 7) | `[PENDENTE]` |

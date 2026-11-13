@@ -4,7 +4,7 @@ Pipeline de transcrição (STT), keyframes e OCR de slides, resumo por LLM e ava
 
 **Pergunta de investigação:** qual é o trade-off entre qualidade (WER/CER) e tempo de processamento de modelos de STT e OCR em vídeos de aula com ruído? Secundária (F9): o erro do STT piora o resumo gerado por LLM?
 
-**Estado:** STT, degradação, métricas, experimentos (RQ1), relatório, página da demo, F9 e F10 (o slide como contexto do STT, opcional) prontos e testados, com dados sintéticos e dublês dos modelos. Falta o Tesseract no host (para o OCR de verdade), a matriz de OCR (RQ2) e os dados reais (vídeos com licença e gabaritos humanos).
+**Estado:** STT, degradação, métricas, experimentos (RQ1), relatório, página da demo, F9 e F10 (o slide como contexto do STT, opcional) prontos e testados, com dados sintéticos e dublês dos modelos. Falta rodar o OCR de verdade (exige o Tesseract com `por` na máquina de execução), a matriz de OCR (RQ2) e os dados reais (vídeos com licença e gabaritos humanos).
 
 ```
 Vídeo ─► FFmpeg (16 kHz mono) ─► Whisper (STT) ─► .vtt / .txt ─────────┐
@@ -28,36 +28,76 @@ Gabarito e vídeo com licença são o gargalo da etapa 1; sem eles, a F10 só po
 
 `[PENDENTE]` (CLAUDE.md, pendência 8). A equipe define **antes** de transcrever: números (por extenso ou algarismos), hesitações ("é…", "né"), siglas, palavras cortadas. A normalização do código (`metrics.norm`) já ignora caixa e pontuação e mantém os acentos.
 
+## Requisitos e escolha do dispositivo
+
+O pipeline roda em **qualquer máquina com Linux, macOS ou Windows (WSL2)**, com ou sem GPU. Nada no código fixa um modelo de hardware: o STT escolhe o dispositivo sozinho (`--device auto`).
+
+| Item | Mínimo | Recomendado |
+|---|---|---|
+| CPU | 4 núcleos (x86-64 ou ARM64) | 8 ou mais |
+| RAM | 8 GB | 16 GB (o modelo `medium` pede mais) |
+| Disco livre | ~5 GB (dependências e modelos `tiny` a `small`) | ~15 GB (com `medium`, Ollama e o contêiner) |
+| GPU | não é obrigatória | NVIDIA com CUDA 12 e 6 GB de VRAM ou mais, para os modelos `small` e `medium` |
+
+**Como o dispositivo é escolhido** (`--device`, aceito por `stt.py`, `pipeline.py`, `run_experiments.py` e `context_stt.py`):
+
+| `--device` | Comportamento |
+|---|---|
+| `auto` (padrão) | Usa CUDA/`float16` se houver GPU NVIDIA **e** o cuBLAS 12 (`libcublas.so.12`) carregar. Senão usa CPU/`int8`, com um aviso quando a GPU é vista mas não pode ser usada |
+| `cpu` | Força CPU/`int8`. Funciona em qualquer máquina |
+| `cuda` | Força a GPU. Falha se o CUDA 12 não estiver instalado |
+
+Só o **tempo** muda com o dispositivo; os modelos e parâmetros (`language="pt"`, `beam_size=5`, `vad_filter=True`) são os mesmos. Por isso:
+
+- **Use o mesmo dispositivo e a mesma máquina em todos os experimentos** de uma comparação. O RTF só é comparável dentro da mesma configuração de hardware. Para garantir, passe `--device cpu` ou `--device cuda` em vez de `auto`.
+- O `run_experiments.py` grava `results/hardware.json` (CPU, threads, RAM, GPUs visíveis, dispositivo que o `auto` de fato usou, sistema e Python). Esse arquivo vai no artigo.
+- **Sem GPU:** prefira `tiny`, `base` e `small` (`--models tiny base small`, que já é o padrão). O `medium` funciona em CPU, porém é lento. O OCR e a extração de slides não usam GPU.
+- **Memória curta:** use os modelos menores e rode um vídeo por vez. A degradação com ruído e a extração de slides são leves.
+- **Colab ou servidor sem interface:** instale como abaixo e use apenas a linha de comando; a GUI (`studio.py`) é opcional.
+
 ## Instalação
+
+Três caminhos, do mais simples ao mais isolado. Os comandos de **sistema** (instalar FFmpeg, Tesseract, Docker) mudam conforme a distribuição; o projeto não os executa por você.
 
 ### Sem contêiner
 
-Requer FFmpeg. Para o OCR, Tesseract com `por` (`sudo pacman -S tesseract tesseract-data-por` no Arch). Para a F9 local, [Ollama](https://ollama.com).
+Requer [`uv`](https://docs.astral.sh/uv/) (ele baixa o Python 3.12 sozinho) e FFmpeg. Para o OCR, Tesseract com o idioma `por`. Para a F9 local, [Ollama](https://ollama.com).
+
+| Sistema | FFmpeg e Tesseract com português |
+|---|---|
+| Arch | `sudo pacman -S ffmpeg tesseract tesseract-data-por` |
+| Debian, Ubuntu | `sudo apt install ffmpeg tesseract-ocr tesseract-ocr-por` |
+| Fedora | `sudo dnf install ffmpeg tesseract tesseract-langpack-por` |
+| macOS (Homebrew) | `brew install ffmpeg tesseract tesseract-lang` |
+| Windows | Use o WSL2 com Ubuntu e siga a linha do Ubuntu |
 
 ```bash
-uv sync                  # Python 3.12 e dependências fixadas
+uv sync                  # Python 3.12 e dependências fixadas (CPU; a GPU é detectada em tempo de execução)
 uv sync --extra llm      # + SDK da Anthropic, só se for usar o Claude na F9
-uv run pytest -q
+uv run pytest -q         # os testes não carregam modelos e passam sem GPU
 ```
+
+Para usar a GPU sem contêiner, o host precisa do driver NVIDIA e do CUDA 12 (`libcublas.so.12`, `libcudnn` 9). Sem eles o `auto` cai para CPU; confira com `uv run python -c "import sys; sys.path.insert(0,'src'); import stt; print(stt.resolve_device('auto'))"`.
 
 ### Em contêiner
 
-Pré-requisitos: Docker (com o usuário no grupo `docker`) e, para a GPU, o NVIDIA Container Toolkit no host. Sem ele, o contêiner roda em CPU e o teste de GPU é pulado.
-
-```bash
-# Arch: o pacote costuma estar no AUR (confirme o nome antes)
-yay -S nvidia-container-toolkit
-sudo nvidia-ctk runtime configure --runtime=docker
-sudo systemctl restart docker
-```
-
-Verificação: `docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi` deve listar a RTX 3060.
+Pré-requisito: Docker (com o usuário no grupo `docker`). A imagem traz FFmpeg, Tesseract com `por` e as dependências fixadas, e **roda em CPU em qualquer máquina**. A GPU é opcional (abaixo).
 
 ```bash
 docker build -t falai:latest .
-HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm pipeline        # pytest -q
+HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm pipeline        # pytest -q, em CPU
 HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm pipeline bash   # shell no contêiner
 ```
+
+**Com GPU NVIDIA** (opcional): instale o [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) no host, configure o Docker e some o override do compose:
+
+```bash
+sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker
+docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi    # deve listar a sua GPU
+HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose -f docker-compose.yml -f docker-compose.gpu.yml run --rm pipeline bash
+```
+
+Sem o toolkit, use só o `docker-compose.yml` (CPU) ou `docker run` sem `--gpus`.
 
 ## Uso rápido: um vídeo e a demo
 
@@ -117,7 +157,7 @@ uv run python src/report.py      # tabela4_resumos e fig4_wer_nota_resumo
 
 ### 4. O slide como contexto (F10, opcional)
 
-Plano e justificativa em [docs/plano_contexto_cruzado.md](docs/plano_contexto_cruzado.md); o passo a passo e a tabela de sintomas estão no [guia.md](guia.md), seção 3.3. **Pré-requisito:** o Tesseract com o português (`sudo pacman -S tesseract tesseract-data-por`, como o usuário).
+Plano e justificativa em [docs/plano_contexto_cruzado.md](docs/plano_contexto_cruzado.md); o passo a passo e a tabela de sintomas estão no [guia.md](guia.md), seção 3.3. **Pré-requisito:** o Tesseract com o português (tabela de instalação acima; o comando de sistema é do usuário).
 
 ```bash
 uv run python src/context.py glossary data/raw/aula01.mp4          # slides (com painel) + OCR + glossário
@@ -139,7 +179,8 @@ Versões fixadas em `pyproject.toml` e travadas em `uv.lock`. Para atualizar uma
 ## Estrutura
 
 ```
-Dockerfile, docker-compose.yml   imagem CUDA 12.4 + FFmpeg + Tesseract (por) e serviço de desenvolvimento
+Dockerfile, docker-compose.yml   imagem (base CUDA 12.4, roda em CPU) + FFmpeg + Tesseract (por) e serviço de desenvolvimento
+docker-compose.gpu.yml           override opcional que reserva a GPU NVIDIA
 pyproject.toml, uv.lock          dependências fixadas
 src/extract.py                   áudio, recorte, slides completos (com painel) e keyframes (baseline)
 src/stt.py                       faster-whisper (com hotwords), legendas (.vtt/.srt) e texto

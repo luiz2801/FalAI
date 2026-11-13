@@ -87,7 +87,7 @@ Pesos: implementação 5,0; artigo técnico 3,0; defesa 2,0.
 | I4 | O que avaliar, como e com quais métricas | Seção 4 deste documento; seção de metodologia do artigo |
 | I5 | Relacionar teoria, implementação e resultados | Discussão cita a teoria que explica cada resultado |
 | I6 | Arquitetura e decisões técnicas, mesmo com bibliotecas prontas | Diagrama em dois planos; justificativa de cada tecnologia |
-| I7 | Viável em tempo e recursos | Escopo MVP; modelos pequenos; Colab se a GPU não der conta |
+| I7 | Viável em tempo e recursos | Escopo MVP; modelos pequenos; roda em CPU; Colab se a máquina não der conta |
 | Ar1, Ar2 | Artigo de 5 a 8 páginas, SBC, PDF, enviado com 48 h de antecedência | `artigo/` (modelo SBC `[PENDENTE]`) |
 | Ar3, Ar4 | Nove seções; limitações e trabalhos futuros | Seção 9 deste documento |
 | Ap1 a Ap6 | 20 min de apresentação, 10 min de arguição, qualquer integrante pode ser arguido | Seção 9 |
@@ -106,13 +106,13 @@ Pesos: implementação 5,0; artigo técnico 3,0; defesa 2,0.
 | 5 | STT | `faster-whisper`, comparando `tiny`, `base`, `small` (e `medium` se a GPU permitir). `language="pt"`, `beam_size=5`, `vad_filter=True` fixos | `[PREMISSA]` |
 | 6 | OCR | Tesseract (`lang="por"`, testando `--psm 6` e `--psm 3`) e EasyOCR. PaddleOCR fica como alternativa | `[PREMISSA]` |
 | 7 | Busca | Substring no F5. Índice sobre transcrição e OCR no F6. CLIP + FAISS só se sobrar tempo | `[PREMISSA]` |
-| 8 | Execução | GPU RTX 3060 12 GB. Fallback `device="cpu"`, `compute_type="int8"`. A mesma escolha em todos os experimentos | `[PREMISSA]` guia, §1.3 |
+| 8 | Execução | Independente de hardware: `--device auto` usa CUDA/`float16` se houver GPU NVIDIA com cuBLAS 12, senão CPU/`int8`; `cpu` e `cuda` forçam. A mesma máquina e o mesmo dispositivo em todos os experimentos de uma comparação; o hardware usado vai no artigo (`guia.md`, 3.0) | `[PREMISSA]` guia, §1.3 e 3.0 |
 | 9 | Ruído | Ruído branco aditivo, SNR 20, 10 e 0 dB, seed 0. Ruído real de sala como extra, se houver tempo. A simplificação vai como limitação | `[PREMISSA]` |
 | 10 | Dataset | 6 vídeos de 5 a 15 min, e trechos de 2 a 3 min com gabarito. Vídeos de ~45 min só para tempo e demo | `[PREMISSA]` |
 | 11 | Modelos | Locais por padrão. F9 com dois backends: Ollama (padrão) e Claude API (paga, só com `--confirm-paid`; o custo entra como métrica) | `[DECIDIDO]` (D2) + `[VALIDAR]` professor, pergunta 3 |
 | 12 | Vídeos | Gravação própria ou licença livre, com licença anotada por vídeo | `[DECIDIDO]` (N4) + `[VALIDAR]` pergunta 2 |
 | 13 | Sumarização (F9) | Opcional. Implementada (`summarize.py`), com avaliação às cegas (`eval_summaries.py`): nota de 1 a 5, fidelidade, cobertura de tópicos e precisão dos timestamps | `[PREMISSA]` |
-| 14 | Hardware | RTX 3060 12 GB, 24 threads, 62 GB de RAM, FFmpeg instalado, Tesseract **não** instalado | `[DECIDIDO]` medido no guia, §1.1 |
+| 14 | Hardware | Sem requisito de modelo específico (mínimo: 4 núcleos, 8 GB de RAM; GPU opcional). Máquinas já usadas, só como registro: desktop com RTX 3060 12 GB, 24 threads, 62 GB; notebook i7-1260P sem GPU (`guia.md`, §1, "Ambiente verificado") | `[DECIDIDO]` medido no guia, §1.1; generalizado em 2026-11-13 (docs/decisoes.md, D21) |
 | 15 | Equipe | Divisão de papéis do planejamento, seção 9 (3 ou 4 integrantes). Nomes não definidos | `[PENDENTE]` |
 | 16 | Repositório | <https://github.com/luiz2801/FalAI> (público) | `[DECIDIDO]` |
 | 17 | Filtro de alucinações do STT | Ligado por padrão; `--no-clean` para comparar (docs/decisoes.md) | `[PREMISSA]` muda o WER: revisar com a equipe |
@@ -159,7 +159,7 @@ RQ4 é o experimento que responde diretamente à diferença entre análise e tra
 **Medição de tempo** (armadilhas que afetam a nota)
 
 - `transcribe()` devolve um gerador: consuma com `list()` antes de parar o cronômetro.
-- A primeira execução inclui inicialização da GPU: faça uma execução de aquecimento e descarte.
+- A primeira execução inclui inicialização do dispositivo (GPU ou caches da CPU): faça uma execução de aquecimento e descarte.
 - Carregamento do modelo é medido à parte. Só a inferência entra no RTF.
 - `language`, `beam_size` e `vad_filter` são iguais entre modelos.
 
