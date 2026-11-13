@@ -53,8 +53,10 @@ def process(video: str | Path, model: str = "small", device: str = "auto", vocab
             context = None
         else:
             progress(f"OCR (tesseract) em {len(out['frames'])} slides...")
-            box = json.loads((frames_dir / "panel.json").read_text(encoding="utf-8")).get("ocr_box")
-            out["frames"] = ocr_mod.ocr_slides(frames_dir, out["frames"], box)
+            panel = json.loads((frames_dir / "panel.json").read_text(encoding="utf-8"))
+            box, title_box = ocr_mod.title_region(panel)
+            out["frames"] = ocr_mod.ocr_slides(frames_dir, out["frames"], box or panel.get("ocr_box"),
+                                               title_box=title_box)
             glossario = ctx.build_glossary(out["frames"])
             ctx.save_glossary(pasta / "glossario.json", glossario)
             (pasta / "ocr.json").write_text(json.dumps({"motor": "tesseract", "psm": 6, "tempo_s": round(

@@ -374,7 +374,7 @@ def main() -> None:
         print("Slides...")
         extract.slides(video, frames_dir, panel=a.panel)
     slides = json.loads((frames_dir / "frames.json").read_text(encoding="utf-8"))
-    box = json.loads((frames_dir / "panel.json").read_text(encoding="utf-8")).get("ocr_box")
+    panel = json.loads((frames_dir / "panel.json").read_text(encoding="utf-8"))
     t0 = time.perf_counter()
     if a.ocr_json:
         ocr = json.loads(Path(a.ocr_json).read_text(encoding="utf-8"))
@@ -386,7 +386,9 @@ def main() -> None:
         if motivo := ocr_mod.status(a.motor):
             raise SystemExit(f"OCR indisponível: {motivo}")
         print(f"OCR ({a.motor}) em {len(slides)} slides...")
-        slides = ocr_mod.ocr_slides(frames_dir, slides, box, motor=a.motor, psm=a.psm)
+        box, title_box = ocr_mod.title_region(panel)
+        slides = ocr_mod.ocr_slides(frames_dir, slides, box or panel.get("ocr_box"), motor=a.motor,
+                                    title_box=title_box, psm=a.psm)
         meta = {"motor": a.motor, "psm": a.psm, "tempo_s": round(sum(s["ocr_tempo_s"] for s in slides), 3)}
     glossario = build_glossary(slides)
     meta["glossario_s"] = round(time.perf_counter() - t0 - meta["tempo_s"], 3)

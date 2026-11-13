@@ -154,7 +154,19 @@ def ocr_easyocr(img, box=None, pre: bool = True, min_conf: float = 0.0, gpu: boo
     return {"texto": texto, "words": palavras, "tempo_s": tempo}
 
 
-def ocr_slides(frames_dir: str | Path, slides: list[dict], box=None, motor: str = "tesseract", **kw) -> list[dict]:
+def title_region(panel: dict | None) -> tuple[tuple | None, tuple | None]:
+    """(caixa do corpo, caixa do título) a partir do panel.json. O título fica na fita texturizada que cobre a borda
+    de cima do painel: no mesmo OCR do corpo ele se perde, e sozinho (psm 7) sai bem. Sem painel: (None, None)."""
+    if not panel or not panel.get("roi"):
+        return None, None
+    y0 = panel["roi"][1]
+    ox0, oy0, ox1, _ = panel.get("ocr_box") or panel["roi"]
+    ty0 = max(0.0, oy0 - 0.12)
+    return tuple(panel["roi"]), ((ox0, ty0, ox1, y0) if y0 - ty0 > 0.04 else None)
+
+
+def ocr_slides(frames_dir: str | Path, slides: list[dict], box=None, motor: str = "tesseract", title_box=None,
+               **kw) -> list[dict]:
     """OCR de cada slide de `frames.json`. Devolve os mesmos dicts com `texto`, `words`, `ocr_conf` (média das
     confianças das palavras, ou None) e `ocr_tempo_s`. A ordem dos slides é mantida."""
     if motor not in MOTORES:
@@ -163,6 +175,10 @@ def ocr_slides(frames_dir: str | Path, slides: list[dict], box=None, motor: str 
     saida = []
     for s in slides:
         r = fn(Path(frames_dir) / s["file"], box, **kw)
+        if title_box:  # título numa passada própria, como uma linha só
+            t = fn(Path(frames_dir) / s["file"], title_box, **({**kw, "psm": 7} if motor == "tesseract" else kw))
+            r = {"texto": (t["texto"].strip() + "\n" + r["texto"]).strip(), "words": t["words"] + r["words"],
+                 "tempo_s": r["tempo_s"] + t["tempo_s"]}
         confs = [w["conf"] for w in r["words"]]
         saida.append({**s, "texto": r["texto"], "words": r["words"],
                       "ocr_conf": round(sum(confs) / len(confs), 1) if confs else None,

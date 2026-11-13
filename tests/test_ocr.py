@@ -80,3 +80,11 @@ def test_ocr_tesseract_le_texto_sintetico(tmp_path):
     assert r["words"] and all(0 <= w["conf"] <= 100 for w in r["words"])
     saida = ocr.ocr_slides(tmp_path, [{"file": "0000.png", "t": 0.0, "t_end": 5.0}])
     assert saida[0]["t_end"] == 5.0 and "BACEN" in saida[0]["texto"].upper() and saida[0]["ocr_conf"] > 0
+
+
+def test_title_region_separa_o_titulo_da_fita():
+    p = {"roi": [0.11, 0.22, 0.89, 0.87], "ocr_box": [0.11, 0.13, 0.89, 0.87]}
+    corpo, titulo = ocr.title_region(p)
+    assert corpo == (0.11, 0.22, 0.89, 0.87) and titulo == pytest.approx((0.11, 0.01, 0.89, 0.22))
+    assert ocr.title_region({"roi": [0.1, 0.03, 0.9, 0.9], "ocr_box": [0.1, 0.03, 0.9, 0.9]})[1] is None  # sem fita
+    assert ocr.title_region(None) == (None, None) and ocr.title_region({"roi": None}) == (None, None)
