@@ -48,6 +48,20 @@ def align(ref: str, hyp: str) -> list[dict]:
             for c in out.alignments[0]]
 
 
+def word_flags(ref: str, hyp_tokens: list[str]) -> list[bool]:
+    """Para cada palavra da hipótese (já normalizada por `norm`), se ela está num trecho `equal` do alinhamento
+    do WER com o gabarito (True) ou foi substituída ou inserida (False). Base da calibração da confiança."""
+    if not hyp_tokens:
+        return []
+    out = jiwer.process_words(_checar_ref(ref), " ".join(hyp_tokens))
+    flags = [False] * len(hyp_tokens)
+    for c in out.alignments[0]:
+        if c.type == "equal":
+            for i in range(c.hyp_start_idx, c.hyp_end_idx):
+                flags[i] = True
+    return flags
+
+
 def word_pr(ref: str, hyp: str) -> tuple[float, float]:
     """Precisão e recall de palavras por multiconjunto (ignora a ordem; bom para slides)."""
     r, h = Counter(norm(ref).split()), Counter(norm(hyp).split())
@@ -83,3 +97,29 @@ def term_accuracy(ref: str, hyp: str, terms: list[str]) -> dict:
         falsos += max(0, nh - nr)
     return {"terms_in_ref": total, "terms_hit": acertos,
             "accuracy": acertos / total if total else None, "false_positives": falsos}
+
+
+def timed_term_accuracy(occurrences: list[tuple[float, str]], hyp_tokens: list[tuple[float, str]],
+                        window_s: float = 3.0) -> dict:
+    """Acerto de termos com gabarito **parcial** (F10, camada A): `occurrences` = [(instante, termo)] das
+    ocorrências faladas, anotadas por quem ouviu o áudio, sem a transcrição completa. `hyp_tokens` =
+    [(instante, palavra normalizada)] da hipótese. Uma ocorrência é acertada se a hipótese tem o termo (como
+    sequência de palavras) a até `window_s` do instante anotado; cada ocorrência da hipótese vale uma
+    anotação só (a mais próxima primeiro). Falsos positivos: ocorrências na hipótese de um termo do
+    vocabulário anotado que não casaram com nenhuma anotação. Mesmo formato de `term_accuracy`."""
+    palavras = [w for _, w in hyp_tokens]
+    acertos = falsos = 0
+    for termo in {norm(x) for _, x in occurrences if norm(x)}:
+        alvo = termo.split()
+        n = len(alvo)
+        na_hip = [hyp_tokens[i][0] for i in range(len(palavras) - n + 1) if palavras[i:i + n] == alvo]
+        livres = list(na_hip)
+        for t in sorted(t for t, x in occurrences if norm(x) == termo):
+            perto = min(livres, key=lambda h: abs(h - t), default=None)
+            if perto is not None and abs(perto - t) <= window_s:
+                livres.remove(perto)
+                acertos += 1
+        falsos += len(livres)
+    total = len(occurrences)
+    return {"terms_in_ref": total, "terms_hit": acertos, "accuracy": acertos / total if total else None,
+            "false_positives": falsos}
