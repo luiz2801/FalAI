@@ -51,15 +51,37 @@ def fmt_srt(t: float) -> str:
 
 
 # ------------------------------------------------------------------ modelo
+_avisou_cuda = False
+
+
+def _cuda_ok() -> bool:
+    """As bibliotecas CUDA que o ctranslate2 carrega na inferência (cuBLAS 12) estão no sistema? O ctranslate2 só
+    confere se há GPU; sem o cuBLAS, a inferência falha no meio com `libcublas.so.12 is not found`."""
+    import ctypes
+
+    try:
+        ctypes.CDLL("libcublas.so.12")
+        return True
+    except OSError:
+        return False
+
+
 def resolve_device(device: str = "auto") -> tuple[str, str]:
-    """(device, compute_type). 'auto' usa CUDA se houver; senão CPU int8 (decisão 8)."""
+    """(device, compute_type). 'auto' usa CUDA se houver GPU **e** o cuBLAS; senão CPU int8 (decisão 8), com um
+    aviso. 'cuda' explícito não é checado: quem pede CUDA recebe o erro do ctranslate2."""
+    global _avisou_cuda
     if device == "auto":
         try:
             import ctranslate2
 
-            device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
-        except Exception:
-            device = "cpu"
+            tem_gpu = ctranslate2.get_cuda_device_count() > 0
+        except Exception:  # noqa: BLE001  # ctranslate2 sem suporte a CUDA, ou não instalado
+            tem_gpu = False
+        device = "cuda" if tem_gpu and _cuda_ok() else "cpu"
+        if tem_gpu and device == "cpu" and not _avisou_cuda:
+            _avisou_cuda = True
+            print("AVISO: GPU CUDA detectada, mas libcublas.so.12 não foi encontrada: usando CPU/int8 "
+                  "(instale o CUDA 12 ou use o contêiner; docs/decisoes.md, D17).")
     return device, ("float16" if device == "cuda" else "int8")
 
 
@@ -134,31 +156,31 @@ def clean_segments(segs: list[dict]) -> tuple[list[dict], list[dict]]:
 
 
 # ------------------------------------------------------------------ transcrição
-def transcribe(
-    media: str | Path,
+def transcribe_array(
+    audio,
     size: str = "small",
     device: str = "auto",
     initial_prompt: str | None = None,
-    clean: bool = True,
+    hotwords: str | None = None,
     word_timestamps: bool = True,
     cpu_threads: int = 0,
     progress=None,
 ) -> tuple[list[dict], float, float]:
-    """Transcreve uma mídia. Devolve (segs, duracao_s, tempo_s).
+    """Transcreve um array float32 (16 kHz, mono) já em memória, **sem** limpar. Devolve (segs, duracao_s,
+    tempo_s). É o núcleo de `transcribe` e o que `context_stt` chama a cada trecho.
 
-    - tempo_s cronometra só a inferência: o gerador é consumido dentro do cronômetro; a carga
-      do modelo e a decodificação do áudio ficam fora (armadilhas 7.1.1 e 7.1.3).
-    - language, beam_size e vad_filter são fixos (decisão 5); condition_on_previous_text=False
-      reduz loops de repetição.
-    - Com clean=True, segs não tem as alucinações conhecidas; os removidos ficam em
-      transcribe.last_removed.
+    - tempo_s cronometra só a inferência: o gerador é consumido dentro do cronômetro; a carga do modelo e a
+      decodificação do áudio ficam fora (armadilhas 7.1.1 e 7.1.3).
+    - language, beam_size e vad_filter são fixos (decisão 5); condition_on_previous_text=False reduz loops.
+    - `hotwords` vale em **toda** janela de ~30 s; o `initial_prompt` só na primeira, porque com
+      condition_on_previous_text=False o faster-whisper zera o prompt depois dela (docs/decisoes.md, D15).
     """
     modelo, _ = load_model(size, device, cpu_threads)
-    audio = load_audio(media)
     t0 = time.perf_counter()
     gerador, info = modelo.transcribe(
         audio, language=LANGUAGE, beam_size=BEAM_SIZE, vad_filter=VAD_FILTER,
-        condition_on_previous_text=False, initial_prompt=initial_prompt, word_timestamps=word_timestamps,
+        condition_on_previous_text=False, initial_prompt=initial_prompt, hotwords=hotwords,
+        word_timestamps=word_timestamps,
     )
     segs = []
     for s in gerador:
@@ -170,11 +192,33 @@ def transcribe(
         })
         if progress and info.duration:
             progress(min(s.end / info.duration, 1.0))
-    tempo_s = time.perf_counter() - t0
+    return segs, info.duration, time.perf_counter() - t0
+
+
+def transcribe(
+    media: str | Path,
+    size: str = "small",
+    device: str = "auto",
+    initial_prompt: str | None = None,
+    clean: bool = True,
+    word_timestamps: bool = True,
+    cpu_threads: int = 0,
+    progress=None,
+    hotwords: str | None = None,
+) -> tuple[list[dict], float, float]:
+    """Transcreve uma mídia. Devolve (segs, duracao_s, tempo_s). Decodifica o áudio (fora do cronômetro) e
+    chama `transcribe_array`.
+
+    - Com clean=True, segs não tem as alucinações conhecidas; os removidos ficam em
+      transcribe.last_removed.
+    """
+    audio = load_audio(media)
+    segs, duracao, tempo_s = transcribe_array(audio, size, device, initial_prompt, hotwords, word_timestamps,
+                                              cpu_threads, progress)
     transcribe.last_removed = []
     if clean:
         segs, transcribe.last_removed = clean_segments(segs)
-    return segs, info.duration, tempo_s
+    return segs, duracao, tempo_s
 
 
 transcribe.last_removed = []
