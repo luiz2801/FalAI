@@ -136,6 +136,11 @@
   .ab-active { outline: 2px solid var(--accent); outline-offset: 2px; }
   audio, video { width: 100%; }
   video { border-radius: 6px; background: #000; max-height: 360px; }
+  .lbl { display: flex; align-items: center; gap: .35rem; }
+  .hint { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 1.05rem; height: 1.05rem; border-radius: 50%; border: 1px solid var(--line); font-size: .7rem; font-weight: 700; cursor: help; color: var(--ink-2); flex: none; outline: none; }
+  .hint:hover, .hint:focus { border-color: var(--ink-2); color: var(--ink); }
+  .hint .bubble { display: none; position: absolute; z-index: 20; top: 1.5rem; left: -.5rem; width: 17rem; max-width: 80vw; padding: .5rem .65rem; border-radius: 6px; background: var(--bg, #222); color: var(--ink); border: 1px solid var(--ink-2); box-shadow: 0 4px 14px rgba(0,0,0,.35); font-size: .78rem; font-weight: 400; line-height: 1.35; text-align: left; white-space: normal; }
+  .hint:hover .bubble, .hint:focus .bubble { display: block; }
 </style>
 </head>
 <body>
@@ -175,18 +180,18 @@
       <h2>Processar um vídeo de ponta a ponta</h2>
       <p class="meta" style="margin-top:-.3rem">Transcrição, slides e, opcional, resumo. Monta o pacote do visualizador em <code>web/data/</code>.</p>
       <form id="jobform" class="grid">
-        <label>Vídeo <select id="f-video" required></select></label>
-        <label>Modelo de STT <select id="f-model"></select></label>
-        <label>Dispositivo <select id="f-device"></select></label>
-        <label>Slides
+        <label data-tip="Vídeo que será processado. Vídeos longos levam mais tempo; o tempo de STT cresce de forma aproximadamente linear com a duração.">Vídeo <select id="f-video" required></select></label>
+        <label data-tip="Tamanho do modelo Whisper. Maiores (small, medium) erram menos palavras (WER menor), sobretudo com ruído, mas são mais lentos (RTF maior). O tiny é rápido e menos preciso.">Modelo de STT <select id="f-model"></select></label>
+        <label data-tip="auto usa a GPU NVIDIA (CUDA, float16) se houver, senão CPU (int8). Não muda o texto de forma relevante, mas muda muito o tempo: a GPU costuma ser várias vezes mais rápida.">Dispositivo <select id="f-device"></select></label>
+        <label data-tip="Como os keyframes dos slides são escolhidos. &quot;Slide completo&quot; espera o slide terminar de ser montado, o que dá um OCR melhor. &quot;Baseline por diferença&quot; pega o quadro ao detectar mudança: é mais simples e pode capturar slides pela metade.">Slides
           <select id="f-frames"><option value="slides">Slide completo (padrão)</option><option value="diff">Baseline por diferença</option></select></label>
-        <label>Contexto dos slides (F10)
+        <label data-tip="Usa o texto dos slides (OCR) para ajudar o STT. L: o slide visível guia o Whisper trecho a trecho. L+F: também corrige siglas e nomes de baixa confiança. G: vocabulário do vídeo todo. Tende a acertar mais termos técnicos, com custo extra de tempo. Exige o Tesseract com português.">Contexto dos slides (F10)
           <select id="f-ctx"><option value="">sem contexto</option><option value="L">L: o slide visível guia o STT</option><option value="L+F">L+F: guia e corrige siglas e nomes</option><option value="G">G: vocabulário do vídeo todo</option><option value="ocr">só OCR (texto dos slides)</option></select></label>
-        <label>Vocabulário (I5) <select id="f-vocab"><option value="">nenhum</option></select></label>
-        <label>Resumo (F9, opcional)
+        <label data-tip="Lista de termos técnicos da disciplina passada ao Whisper como dica. Pode melhorar o acerto de siglas e nomes, mas pode induzir falsos positivos. Só vale na 1ª janela de áudio.">Vocabulário (I5) <select id="f-vocab"><option value="">nenhum</option></select></label>
+        <label data-tip="Gera um resumo com LLM a partir da transcrição. Ollama roda local e é grátis. Claude API é paga. Erros do STT se propagam para o resumo. Aumenta bastante o tempo total.">Resumo (F9, opcional)
           <select id="f-summary"><option value="">sem resumo</option><option value="ollama">Ollama (local)</option><option value="claude">Claude API (paga)</option></select></label>
-        <label>Modelo do LLM <input type="text" id="f-llm" placeholder="padrão do backend"></label>
-        <label>Intervalo (s) <input type="number" id="f-step" step="0.1" min="0.1" placeholder="padrão"></label>
+        <label data-tip="Modelo usado no resumo (ex.: qwen2.5:7b no Ollama). Modelos maiores resumem com mais fidelidade, mas são mais lentos e, na API, mais caros. Vazio usa o padrão do backend.">Modelo do LLM <input type="text" id="f-llm" placeholder="padrão do backend"></label>
+        <label data-tip="Intervalo entre quadros analisados na extração de slides. Menor: pega mais slides e transições, mas aumenta o tempo e o número de quadros duplicados. Maior: mais rápido, mas pode perder slides curtos.">Intervalo (s) <input type="number" id="f-step" step="0.1" min="0.1" placeholder="padrão"></label>
         <label class="check full" id="paidrow" hidden><input type="checkbox" id="f-paid"> Confirmo que a chamada à API do Claude gera custo.</label>
         <p class="warn full" id="llmwarn" hidden></p>
         <p class="warn full" id="ctxwarn" hidden>O OCR e o contexto exigem o modo “Slide completo” e o Tesseract com o idioma português. Sem eles, são pulados e o STT segue sem contexto.</p>
@@ -1126,6 +1131,17 @@ document.addEventListener("keydown", (e) => {
   refreshQueue();
   route();
 })();
+</script>
+<script>
+document.querySelectorAll("label[data-tip]").forEach((l) => {
+  const w = document.createElement("span"); w.className = "lbl";
+  while (l.firstChild && !(l.firstChild.nodeType === 1 && /^(SELECT|INPUT)$/.test(l.firstChild.tagName))) w.appendChild(l.firstChild);
+  const t = document.createElement("span"); t.className = "hint"; t.tabIndex = 0; t.textContent = "?";
+  t.setAttribute("aria-label", l.dataset.tip);
+  const b = document.createElement("span"); b.className = "bubble"; b.textContent = l.dataset.tip; t.appendChild(b);
+  t.addEventListener("click", (e) => e.preventDefault());
+  w.appendChild(t); l.insertBefore(w, l.firstChild);
+});
 </script>
 </body>
 </html>
