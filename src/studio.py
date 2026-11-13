@@ -49,6 +49,13 @@ LICENSES = RAW / "licenses.json"  # regra 4: licença anotada por vídeo (data/r
 EXTS = {".mp4", ".mkv", ".webm", ".mov"}  # as mesmas de run_experiments.VIDEO_EXT
 MAX_UPLOAD = 4 * 1024**3
 CONDITIONS = ["limpo", "snr20", "snr10", "snr0"]  # run_experiments.CONDITIONS (teste confere)
+CONTEXTS = ["B0", "G", "P", "L", "L+F", "O"]  # run_experiments.CONTEXTS (teste confere)
+# formato de uma condição de hipótese: ruído (limpo, snr10, limpo_vocab...) com @modo de contexto opcional (limpo@L+F),
+# ou pipeline@modo (saída do pipeline.py --context). Só barra caracteres perigosos: se não existe, a rota devolve 404.
+COND_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*(?:@[A-Za-z0-9+_-]+)?")
+AUDIT_CSV = RESULTS / "correcoes_auditoria.csv"
+AUDIT_FIELDS = ["video", "modelo", "condicao", "idx", "t", "antes", "depois", "auditoria", "nota"]
+AUDIT_VALUES = {"certa": "Certa", "errada": "Errada", "duvida": "Não sei"}
 ERROR_FIELDS = ["video", "modelo", "condicao", "idx", "tipo", "ref", "hyp", "categoria", "nota"]
 # categorias da análise de erros (docs/decisoes.md, D12)
 CATEGORIES = {"nome_proprio": "Nome próprio", "sigla": "Sigla", "numero": "Número",
@@ -57,7 +64,8 @@ CATEGORIES = {"nome_proprio": "Nome próprio", "sigla": "Sigla", "numero": "Núm
               "alucinacao": "Alucinação", "outro": "Outro"}
 
 # (prefixo da mensagem de progresso do pipeline, id da etapa)
-STAGES = [("STT", "stt"), ("Slides", "frames"), ("Keyframes", "frames"), ("Resumo", "summary"), ("Demo", "web")]
+STAGES = [("STT", "stt"), ("Slides", "frames"), ("Keyframes", "frames"), ("OCR", "ocr"), ("Resumo", "summary"),
+          ("Demo", "web")]
 # linha que run_experiments.py imprime ao terminar cada (modelo, vídeo, condição) ou cada resumo
 _DONE_LINE = re.compile(r"^\[\d\d:\d\d:\d\d\] ")
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
@@ -122,7 +130,7 @@ def _run_pipeline(job: Job) -> None:
     p = job.params
     out = pipeline.process(
         RAW / job.video, p["model"], p["device"], p.get("vocab"), p.get("summary"), p.get("llm_model"),
-        p.get("step_s"), 0.04, True, job.say, p["frames_mode"])
+        p.get("step_s"), 0.04, True, job.say, p["frames_mode"], p.get("context"), bool(p.get("ocr")))
     job.summary = {"duration_s": out["duration_s"], "time_s": out["time_s"],
                    "rtf": out["time_s"] / out["duration_s"] if out["duration_s"] else None,
                    "n_segments": len(out["segments"]), "n_slides": len(out["frames"]),
@@ -168,6 +176,17 @@ def _check_name(name: str) -> str:
     if not _NAME.fullmatch(name or "") or ".." in name:
         raise HTTPException(400, f"nome inválido: {name!r}")
     return name
+
+
+def _check_cond(cond: str) -> str:
+    if not COND_RE.fullmatch(cond or ""):
+        raise HTTPException(400, f"condição inválida: {cond!r}")
+    return cond
+
+
+def _noise_of(cond: str) -> str:
+    """Condição de ruído de uma condição de hipótese: 'snr10@L+F' -> 'snr10'; 'limpo_vocab' -> 'limpo'."""
+    return cond.split("@", 1)[0].removesuffix("_vocab")
 
 
 def _read_licenses() -> dict:
@@ -241,14 +260,20 @@ def _hyp_sources() -> list[dict]:
                 out.append({"video": v, "modelo": partes[0], "condicao": partes[1]})
     ordem = CONDITIONS + ["limpo_vocab"]
     modelos = [m.removesuffix("-semfiltro") for m in stt.MODELS]
+
+    def chave_cond(c: str) -> tuple[int, int]:  # sem contexto primeiro, depois B0, G, P, L, L+F, O
+        ruido, _, modo = c.partition("@")
+        return (ordem.index(ruido) if ruido in ordem else 99, CONTEXTS.index(modo) if modo in CONTEXTS else -1)
+
     return sorted(out, key=lambda s: (
         s["video"], modelos.index(b) if (b := s["modelo"].removesuffix("-semfiltro")) in modelos else 99,
-        s["modelo"], ordem.index(s["condicao"]) if s["condicao"] in ordem else 99))
+        s["modelo"], chave_cond(s["condicao"])))
 
 
 def _load_hyp(video: str, modelo: str, cond: str) -> dict:
-    for x in (video, modelo, cond):
-        _check_name(x)
+    _check_name(video)
+    _check_name(modelo)
+    _check_cond(cond)
     arq = _hyp_dir(video) / f"{video}.{modelo}.{cond}.json"
     if not arq.exists():
         raise HTTPException(404, "hipótese não encontrada (rode os experimentos)")
@@ -295,7 +320,7 @@ def config() -> dict:
     from summarize import DEFAULT_MODELS, backend_status
 
     return {
-        "models": stt.MODELS, "devices": ["auto", "cpu", "cuda"], "conditions": CONDITIONS,
+        "models": stt.MODELS, "devices": ["auto", "cpu", "cuda"], "conditions": CONDITIONS, "contexts": CONTEXTS,
         "resolved_device": stt.resolve_device("auto")[0],
         "vocab_files": sorted(str(p.relative_to(ROOT)) for p in GT.glob("terms*.txt")),
         "has_terms": (GT / "terms.txt").exists(),
@@ -323,7 +348,8 @@ def _library() -> list[dict]:
         items.append({
             "id": v, "file": f.name, "size_mb": round(f.stat().st_size / 1e6, 1),
             "license": lic.get(f.name), "gt": (GT / f"{v}.stt.txt").exists(), "clip": clips.get(v),
-            "status": {"stt": bool(manifest), "slides": bool(manifest), "ocr": False,
+            "status": {"stt": bool(manifest), "slides": bool(manifest), "ocr": (DERIVED / v / "ocr.json").exists(),
+                       "glossary": (DERIVED / v / "glossario.json").exists(),
                        "summary": bool(manifest and manifest.get("summary"))},
             "thumb": thumb, "viewer": f"index.html?v={v}" if manifest else None,
         })
@@ -383,6 +409,8 @@ class JobIn(BaseModel):
     frames_mode: str = "slides"
     step_s: float | None = None
     confirm_paid: bool = False
+    context: str | None = None  # None | G | L | L+F (F10): o texto dos slides guia o STT
+    ocr: bool = False  # só preenche o texto dos slides, sem contexto
 
 
 def _pipeline_cmd(j: JobIn) -> str:
@@ -397,6 +425,10 @@ def _pipeline_cmd(j: JobIn) -> str:
         c += f" --frames-mode {j.frames_mode}"
     if j.step_s:
         c += f" --step-s {j.step_s}"
+    if j.context:
+        c += f" --context {j.context}"
+    elif j.ocr:
+        c += " --ocr"
     return c
 
 
@@ -413,13 +445,18 @@ def create_job(j: JobIn) -> dict:
         raise HTTPException(400, "modelo ou dispositivo inválido")
     if j.frames_mode not in ("slides", "diff") or j.summary not in (None, "ollama", "claude"):
         raise HTTPException(400, "parâmetro inválido")
+    if j.context not in (None, "G", "L", "L+F"):
+        raise HTTPException(400, "contexto inválido (G, L ou L+F)")
+    if (j.context or j.ocr) and j.frames_mode != "slides":
+        raise HTTPException(400, "OCR e contexto exigem o modo de slides")
     if j.vocab and not (re.fullmatch(r"data/gt/[\w.-]+\.txt", j.vocab) and (ROOT / j.vocab).is_file()):
         raise HTTPException(400, "vocabulário deve ser um .txt em data/gt/")
     _check_llm_model(j.llm_model)
     if j.summary == "claude" and not j.confirm_paid:  # CLAUDE.md, decisão 11: API paga só com confirmação
         raise HTTPException(402, "o backend Claude é pago: marque a confirmação de custo")
     params = j.model_dump(exclude={"video", "confirm_paid"})
-    title = f"Processar {j.video} ({j.model}{' + ' + j.summary if j.summary else ''})"
+    title = (f"Processar {j.video} ({j.model}{', contexto ' + j.context if j.context else ''}"
+             f"{' + ' + j.summary if j.summary else ''})")
     return _enqueue(Job("pipeline", title, params, _pipeline_cmd(j), video=j.video)).public()
 
 
@@ -478,7 +515,8 @@ async def events(job_id: str, since: int = 0) -> StreamingResponse:
 
 # ================================================================== experimentos (run_experiments.py)
 class ExpIn(BaseModel):
-    mode: str = "stt"  # stt (RQ1) | summaries (F9)
+    mode: str = "stt"  # stt (RQ1) | summaries (F9) | context (F10: RQ6 a RQ8)
+    contexts: list[str] = Field(default_factory=lambda: ["B0", "G", "P", "L", "L+F"])
     models: list[str] = Field(default_factory=lambda: ["tiny", "base", "small"])
     conditions: list[str] = Field(default_factory=lambda: list(CONDITIONS))
     reps: int | None = None  # padrão do script: 3 no STT, 2 nos resumos
@@ -492,16 +530,18 @@ class ExpIn(BaseModel):
 
 
 def _exp_validate(e: ExpIn) -> int:
-    if e.mode not in ("stt", "summaries"):
+    if e.mode not in ("stt", "summaries", "context"):
         raise HTTPException(400, "modo inválido")
     if not e.models or any(m not in stt.MODELS for m in e.models):
         raise HTTPException(400, "modelo inválido")
-    if e.mode == "stt" and (not e.conditions or any(c not in CONDITIONS for c in e.conditions)):
+    if e.mode in ("stt", "context") and (not e.conditions or any(c not in CONDITIONS for c in e.conditions)):
         raise HTTPException(400, "condição inválida")
+    if e.mode == "context" and (not e.contexts or any(c not in CONTEXTS for c in e.contexts)):
+        raise HTTPException(400, "contexto inválido")
     if e.device not in ("auto", "cpu", "cuda") or e.backend not in ("ollama", "claude"):
         raise HTTPException(400, "dispositivo ou backend inválido")
     _check_llm_model(e.llm_model)
-    reps = e.reps or (3 if e.mode == "stt" else 2)
+    reps = e.reps or (2 if e.mode == "summaries" else 3)
     if not 1 <= reps <= 10:
         raise HTTPException(400, "repetições entre 1 e 10")
     return reps
@@ -512,6 +552,9 @@ def _exp_argv(e: ExpIn, reps: int) -> list[str]:
     if e.mode == "stt":
         a += ["--conditions", *e.conditions]
         a += ["--vocab"] if e.vocab else []
+        a += ["--no-clean"] if e.no_clean else []
+    elif e.mode == "context":
+        a += ["--conditions", *e.conditions, "--context", *e.contexts]
         a += ["--no-clean"] if e.no_clean else []
     else:
         a += ["--summaries", "--backend", e.backend]
@@ -546,6 +589,30 @@ def _exp_plan(e: ExpIn, reps: int) -> dict:
         pend = sum(per_model.values())
         return {"mode": "stt", "videos": com_gt, "without_gt": sem_gt, "conditions": conds, "reps": reps,
                 "per_model": per_model, "pending": pend, "total": len(e.models) * len(com_gt) * len(conds),
+                "transcriptions": pend * reps + sum(1 for n in per_model.values() if n),
+                "problems": problems, "cmd": "uv run python " + " ".join(_exp_argv(e, reps))}
+    if e.mode == "context":
+        clips = _read_clips()
+        com_gt = sorted(v for v in clips if (GT / f"{v}.stt.txt").exists())
+        com_gloss = [v for v in com_gt if (DERIVED / v / "glossario.json").exists()]
+        sem_gloss = sorted(set(com_gt) - set(com_gloss))
+        if not com_gt:
+            problems.append("nenhum trecho tem gabarito data/gt/<video>.stt.txt (tela Gabarito)")
+        if sem_gloss:
+            problems.append("sem glossário (uv run python src/context.py glossary <vídeo>): " + ", ".join(sem_gloss))
+        if "O" in e.contexts and not (GT / "terms.txt").exists():
+            problems.append("o contexto O (oráculo) exige data/gt/terms.txt")
+        if "P" in e.contexts and len(com_gloss) < 2:
+            problems.append("o contexto P (placebo) exige o glossário de pelo menos 2 vídeos")
+        for m in e.models:
+            rot = f"{m}-semfiltro" if e.no_clean else m
+            per_model[rot] = sum((v, "stt", rot, f"{c}@{x}", str(reps), "wer") not in feitos
+                                 for v in com_gloss for c in e.conditions for x in e.contexts)
+        pend = sum(per_model.values())
+        return {"mode": "context", "videos": com_gloss, "without_gt": sorted(set(clips) - set(com_gt)),
+                "without_glossary": sem_gloss, "conditions": [f"{c}@{x}" for c in e.conditions for x in e.contexts],
+                "reps": reps, "per_model": per_model, "pending": pend,
+                "total": len(e.models) * len(com_gloss) * len(e.conditions) * len(e.contexts),
                 "transcriptions": pend * reps + sum(1 for n in per_model.values() if n),
                 "problems": problems, "cmd": "uv run python " + " ".join(_exp_argv(e, reps))}
     from summarize import backend_status
@@ -583,7 +650,8 @@ def exp_start(e: ExpIn) -> dict:
     if not plan["pending"]:
         raise HTTPException(409, "nada pendente: tudo já está no raw.csv (marque “refazer” para repetir)")
     total = plan["pending"]  # combinações (STT) ou resumos (F9): o script imprime uma linha por item
-    title = ("RQ1 STT × ruído" if e.mode == "stt" else f"F9 resumos ({e.backend})") + f": {', '.join(e.models)}"
+    titulo = {"stt": "RQ1 STT × ruído", "context": "F10 contexto do slide"}.get(e.mode, f"F9 resumos ({e.backend})")
+    title = f"{titulo}: {', '.join(e.models)}"
     argv = _exp_argv(e, reps)
     return _enqueue(Job("experiment", title, e.model_dump(), "uv run python " + " ".join(argv), argv, total)).public()
 
@@ -602,7 +670,8 @@ def results(video: str | None = None) -> dict:
     import report  # pandas e matplotlib só quando a tela abrir
 
     out: dict = {"exists": RAW_CSV.exists(), "videos": [], "stt": [], "load": [], "summary": [],
-                 "models_order": stt.MODELS, "conditions_order": CONDITIONS + ["limpo_vocab"]}
+                 "models_order": stt.MODELS, "conditions_order": CONDITIONS + ["limpo_vocab"], "ctx": [],
+                 "contexts_order": CONTEXTS}
     hw = RESULTS / "hardware.json"
     out["hardware"] = json.loads(hw.read_text(encoding="utf-8")) if hw.exists() else None
     fig = RESULTS / "figures"
@@ -616,6 +685,8 @@ def results(video: str | None = None) -> dict:
     s = df[df.tarefa == "stt"]
     if video:
         s = s[s.video.astype(str) == video]
+    ctx = s[s.condicao.str.contains("@", na=False)]  # F10: condição "<ruído>@<modo>", fora das tabelas da RQ1
+    s = s[~s.condicao.str.contains("@", na=False)]
 
     def agg(serie):
         n = int(serie.count())
@@ -630,6 +701,8 @@ def results(video: str | None = None) -> dict:
             x = s[(s.metrica_erro == met) & (s.modelo == m) & (s.condicao == c)]
             linha[met] = agg(x.valor_erro) if not x.empty else None
         out["stt"].append(linha)
+    out["ctx"] = [{"modelo": m, "condicao": c, "metrica": met, **agg(g.valor_erro), "rtf": agg(g.rtf)}
+                  for (m, c, met), g in ctx.groupby(["modelo", "condicao", "metrica_erro"])]
     carga = df[(df.tarefa == "stt") & (df.metrica_erro == "carga_modelo")]
     out["load"] = [{"modelo": m, "tempo_s": agg(g.tempo_s)} for m, g in carga.groupby("modelo")]
     r = df[df.tarefa == "resumo"]
@@ -741,7 +814,7 @@ def gt_put_text(video: str, t: TextIn) -> dict:
 def media(video: str, cond: str) -> FileResponse:
     """Áudio do trecho: data/derived/<v>/<v>.clip.<cond>.wav (limpo_vocab usa o áudio limpo)."""
     _check_name(video)
-    cond = cond.removesuffix(".wav").removesuffix("_vocab")
+    cond = _noise_of(cond.removesuffix(".wav"))  # o áudio de uma condição de contexto é o do seu ruído
     if cond not in CONDITIONS:
         raise HTTPException(400, "condição inválida")
     f = DERIVED / video / f"{video}.clip.{cond}.wav"
@@ -821,11 +894,116 @@ def err_summary() -> dict:
 @app.get("/api/ab/{video}/{modelo}/{cond}")
 def ab_side(video: str, modelo: str, cond: str) -> dict:
     hyp = _load_hyp(video, modelo, cond)
-    base = cond.removesuffix("_vocab")
+    base = _noise_of(cond)
     audio = (DERIVED / video / f"{video}.clip.{base}.wav").exists()
     return {"segments": [{"start": s["start"], "end": s["end"], "text": s["text"]} for s in hyp["segments"]],
             "audio": f"/api/media/{video}/{base}" if audio else None,
             "wer": _raw_mean(video, modelo, cond, "wer"), "cer": _raw_mean(video, modelo, cond, "cer")}
+
+
+# ================================================================== auditoria das correções (F10)
+def _read_jsonl(path: Path) -> list[dict]:
+    return [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines() if x.strip()]
+
+
+def _correction_sources() -> list[dict]:
+    """Registros de correções guardados: os da RQ6 (data/derived/<v>/stt/<v>.<modelo>.<cond>.correcoes.jsonl, o áudio
+    é o do trecho) e os do pipeline (data/derived/<v>/<v>.<modelo>.ctx-LF.correcoes.jsonl, o áudio é o do vídeo)."""
+    fontes = []
+    for vd in sorted(p for p in DERIVED.iterdir() if p.is_dir()) if DERIVED.exists() else []:
+        v = vd.name
+        for f in sorted((vd / "stt").glob(f"{v}.*.correcoes.jsonl")):
+            modelo, _, cond = f.name[len(v) + 1:].removesuffix(".correcoes.jsonl").partition(".")
+            if cond:
+                fontes.append({"video": v, "modelo": modelo, "condicao": cond, "path": f, "origem": "rq6"})
+        for f in sorted(vd.glob(f"{v}.*.correcoes.jsonl")):
+            modelo, achou, ctx = f.name[len(v) + 1:].removesuffix(".correcoes.jsonl").partition(".ctx-")
+            if achou:
+                fontes.append({"video": v, "modelo": modelo, "condicao": f"pipeline@{'L+F' if ctx == 'LF' else ctx}",
+                               "path": f, "origem": "pipeline"})
+    return fontes
+
+
+def _read_audit() -> list[dict]:
+    if not AUDIT_CSV.exists():
+        return []
+    with AUDIT_CSV.open(encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def _write_audit(rows: list[dict]) -> None:
+    AUDIT_CSV.parent.mkdir(parents=True, exist_ok=True)
+    tmp = AUDIT_CSV.with_suffix(".tmp")
+    with tmp.open("w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=AUDIT_FIELDS)
+        w.writeheader()
+        w.writerows(rows)
+    tmp.replace(AUDIT_CSV)
+
+
+def _audio_of(src: dict) -> str | None:
+    if src["origem"] == "pipeline":
+        video = next((p.name for p in _raw_videos() if p.stem == src["video"]), None)
+        return f"/api/raw/{video}" if video else None
+    ruido = _noise_of(src["condicao"])
+    return f"/api/media/{src['video']}/{ruido}" if (DERIVED / src["video"] / f"{src['video']}.clip.{ruido}.wav").exists() else None
+
+
+def _same_correction(marca: dict, c: dict) -> bool:
+    """A marcação ainda vale para esta correção? (o registro muda se a RQ6 for refeita)"""
+    return marca["antes"] == c["antes"] and marca["depois"] == c["depois"] and abs(float(marca["t"]) - c["t"]) < 0.05
+
+
+@app.get("/api/ctx/corrections")
+def ctx_corrections() -> dict:
+    """Cada troca feita por context_fix (L+F), com a frase antes e depois e o áudio, para quem audita OUVINDO dizer se
+    a troca está certa. `precision` = certas ÷ (certas + erradas); "não sei" fica de fora."""
+    marcas = {(r["video"], r["modelo"], r["condicao"], r["idx"]): r for r in _read_audit()}
+    itens = []
+    for src in _correction_sources():
+        audio = _audio_of(src)
+        for i, c in enumerate(_read_jsonl(src["path"])):
+            m = marcas.get((src["video"], src["modelo"], src["condicao"], str(i)))
+            vale = bool(m) and _same_correction(m, c)
+            itens.append({"video": src["video"], "modelo": src["modelo"], "condicao": src["condicao"], "idx": i,
+                          "origem": src["origem"], "audio": audio,
+                          **{k: c.get(k) for k in ("t", "antes", "depois", "p", "sim", "regra", "slide", "termo",
+                                                   "seg_antes", "seg_depois")},
+                          "auditoria": m["auditoria"] if vale else None, "nota": m["nota"] if vale else "",
+                          "desatualizada": bool(m) and not vale})
+    cont = {k: sum(1 for x in itens if x["auditoria"] == k) for k in AUDIT_VALUES}
+    julgadas = cont["certa"] + cont["errada"]
+    return {"items": itens, "counts": cont, "total": len(itens), "labels": AUDIT_VALUES,
+            "precision": cont["certa"] / julgadas if julgadas else None}
+
+
+class AuditIn(BaseModel):
+    auditoria: str | None = None  # certa | errada | duvida; None/"" remove a marcação
+    nota: str = ""
+
+
+@app.put("/api/ctx/corrections/{video}/{modelo}/{cond}/{idx}")
+def ctx_audit(video: str, modelo: str, cond: str, idx: int, a: AuditIn) -> dict:
+    _check_name(video)
+    _check_name(modelo)
+    _check_cond(cond)
+    src = next((x for x in _correction_sources() if (x["video"], x["modelo"], x["condicao"]) == (video, modelo, cond)), None)
+    if not src:
+        raise HTTPException(404, "registro de correções não encontrado")
+    itens = _read_jsonl(src["path"])
+    if not 0 <= idx < len(itens):
+        raise HTTPException(400, "índice de correção inválido")
+    if a.auditoria and a.auditoria not in AUDIT_VALUES:
+        raise HTTPException(400, "marcação inválida (certa, errada ou duvida)")
+    chave = (video, modelo, cond, str(idx))
+    rows = [r for r in _read_audit() if (r["video"], r["modelo"], r["condicao"], r["idx"]) != chave]
+    if a.auditoria:
+        c = itens[idx]
+        rows.append({"video": video, "modelo": modelo, "condicao": cond, "idx": idx, "t": c["t"], "antes": c["antes"],
+                     "depois": c["depois"], "auditoria": a.auditoria, "nota": a.nota.replace("\n", " ").strip()[:300]})
+    rows.sort(key=lambda r: (r["video"], r["modelo"], r["condicao"], int(r["idx"])))
+    _write_audit(rows)
+    return {"ok": True}
 
 
 # ================================================================== páginas

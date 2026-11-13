@@ -70,6 +70,7 @@
   .full { grid-column: 1 / -1; }
   .warn { color: var(--warn); font-size: .85rem; }
   .warn::before { content: "⚠ "; }
+  mark { background: #ffe08a; color: #1a1a1a; padding: 0 .15em; border-radius: 3px; }
   .err { color: var(--bad); }
   .ok { color: var(--ok); }
   .note { font-size: .85rem; color: var(--ink-2); border-left: 3px solid var(--line); padding-left: .6rem; margin: .5rem 0; }
@@ -142,7 +143,7 @@
   <h1>FalAI Studio</h1>
   <nav>
     <a href="#lib">Vídeos</a><a href="#run">Processar</a><a href="#exp">Experimentos</a><a href="#res">Resultados</a>
-    <a href="#gt">Gabarito</a><a href="#err">Erros</a><a href="#ab">A/B</a><a href="index.html" target="_blank" rel="noopener">Visualizador ↗</a>
+    <a href="#gt">Gabarito</a><a href="#err">Erros</a><a href="#ab">A/B</a><a href="#cor">Correções</a><a href="index.html" target="_blank" rel="noopener">Visualizador ↗</a>
   </nav>
   <span id="qbadge"></span>
   <span id="dev"></span>
@@ -179,6 +180,8 @@
         <label>Dispositivo <select id="f-device"></select></label>
         <label>Slides
           <select id="f-frames"><option value="slides">Slide completo (padrão)</option><option value="diff">Baseline por diferença</option></select></label>
+        <label>Contexto dos slides (F10)
+          <select id="f-ctx"><option value="">sem contexto</option><option value="L">L: o slide visível guia o STT</option><option value="L+F">L+F: guia e corrige siglas e nomes</option><option value="G">G: vocabulário do vídeo todo</option><option value="ocr">só OCR (texto dos slides)</option></select></label>
         <label>Vocabulário (I5) <select id="f-vocab"><option value="">nenhum</option></select></label>
         <label>Resumo (F9, opcional)
           <select id="f-summary"><option value="">sem resumo</option><option value="ollama">Ollama (local)</option><option value="claude">Claude API (paga)</option></select></label>
@@ -186,6 +189,7 @@
         <label>Intervalo (s) <input type="number" id="f-step" step="0.1" min="0.1" placeholder="padrão"></label>
         <label class="check full" id="paidrow" hidden><input type="checkbox" id="f-paid"> Confirmo que a chamada à API do Claude gera custo.</label>
         <p class="warn full" id="llmwarn" hidden></p>
+        <p class="warn full" id="ctxwarn" hidden>O OCR e o contexto exigem o modo “Slide completo” e o Tesseract com o idioma português. Sem eles, são pulados e o STT segue sem contexto.</p>
         <div class="full"><div class="meta">Comando equivalente (reprodutibilidade):</div><pre id="cmd"></pre></div>
         <div class="actions full"><button class="btn primary" id="go" type="submit">Processar</button><span class="err" id="runerr"></span></div>
       </form>
@@ -205,10 +209,12 @@
       <form id="expform" class="grid">
         <fieldset class="full"><legend>Experimento</legend>
           <label class="check"><input type="radio" name="mode" value="stt" checked> RQ1: STT × ruído</label>
+          <label class="check"><input type="radio" name="mode" value="context"> F10: o slide como contexto (RQ6 a RQ8)</label>
           <label class="check"><input type="radio" name="mode" value="summaries"> F9: resumo por LLM</label>
         </fieldset>
         <fieldset class="full"><legend>Modelos de STT</legend><span id="x-models" style="display:contents"></span></fieldset>
-        <fieldset class="full" data-mode="stt"><legend>Condições do áudio</legend><span id="x-conds" style="display:contents"></span></fieldset>
+        <fieldset class="full" data-mode="stt context"><legend>Condições do áudio</legend><span id="x-conds" style="display:contents"></span></fieldset>
+        <fieldset class="full" data-mode="context"><legend>Contextos (B0 é a linha de base; P é o placebo; O é o oráculo)</legend><span id="x-ctxs" style="display:contents"></span></fieldset>
         <label>Repetições <input type="number" id="x-reps" min="1" max="10" value="3"></label>
         <label>Dispositivo <select id="x-device"></select></label>
         <label data-mode="summaries">Backend do LLM
@@ -216,7 +222,7 @@
         <label data-mode="summaries">Modelo do LLM <input type="text" id="x-llm" placeholder="padrão do backend"></label>
         <fieldset class="full"><legend>Opções</legend>
           <label class="check" data-mode="stt"><input type="checkbox" id="x-vocab"> condição <code>limpo_vocab</code> (I5, precisa de data/gt/terms.txt)</label>
-          <label class="check" data-mode="stt"><input type="checkbox" id="x-noclean"> sem o filtro de alucinações (<code>-semfiltro</code>)</label>
+          <label class="check" data-mode="stt context"><input type="checkbox" id="x-noclean"> sem o filtro de alucinações (<code>-semfiltro</code>)</label>
           <label class="check"><input type="checkbox" id="x-redo"> refazer o que já está no raw.csv</label>
           <label class="check" data-mode="summaries" id="x-paidrow"><input type="checkbox" id="x-paid"> Confirmo que a API do Claude gera custo</label>
         </fieldset>
@@ -250,10 +256,26 @@
       </div>
       <div class="panel" id="t3wrap" hidden><h2>Acerto de termos técnicos (I5)</h2><div class="tablewrap" id="t3"></div></div>
       <div class="panel" id="t4wrap" hidden><h2>Resumos (F9)</h2><div class="tablewrap" id="t4"></div></div>
+      <div class="panel" id="t5wrap" hidden><h2>O slide como contexto (F10)</h2><div class="tablewrap" id="t5"></div>
+        <p class="meta">B0 é a linha de base; P é o placebo (termos de outro vídeo); O é o oráculo (o <code>terms.txt</code> humano). “Termos do slide” e “termos fora do slide” dividem os termos humanos pelo que estava em algum slide do trecho: o segundo é o controle negativo. O custo (ΔRTF) e as figuras estão no report.py.</p></div>
     </div>
     <div class="panel" id="repjob" hidden></div>
     <div class="panel"><h2>Saídas do report.py</h2><p class="meta" style="margin-top:-.3rem">As figuras e tabelas que vão para o artigo (<code>results/figures/</code>, <code>results/tables/</code>).</p>
       <div class="figs" id="figs"></div><h3>Tabelas</h3><div class="actions" id="tabs"></div><pre id="tabview" hidden style="margin-top:.6rem"></pre></div>
+  </section>
+
+  <!-- ================= Correções (F10) ================= -->
+  <section id="cor" data-view hidden>
+    <div class="actions" style="margin-bottom:.8rem">
+      <label>Mostrar <select id="c-filter"><option value="pendentes">só as sem marcação</option><option value="todas">todas</option></select></label>
+      <span class="meta" id="c-stat"></span>
+    </div>
+    <p class="note">Cada troca feita pelo <code>context_fix</code> (condição <code>L+F</code>) vira uma pergunta: <b>ouvindo o áudio</b>, o termo do slide é o que foi dito? Marque <b>certa</b>, <b>errada</b> ou <b>não sei</b>. A precisão (certas ÷ certas + erradas) é a métrica <code>precisao_correcoes</code>; não vale “achar que está certo” sem ouvir (CLAUDE.md, regra 11). Teclas: 1 certa · 2 errada · 3 não sei · ←/→ navega · R ouve o trecho.</p>
+    <p class="meta" id="c-empty" hidden>Nenhuma correção ainda. Elas são gravadas pela condição <code>L+F</code> da tela <a href="#exp">Experimentos</a> e por <code>pipeline.py --context L+F</code>.</p>
+    <div class="panel" id="c-card" hidden></div>
+    <div class="panel"><h2>Levar as marcações para o raw.csv</h2>
+      <p class="meta" style="margin-top:-.3rem">Depois de auditar, grava a linha <code>precisao_correcoes</code> de cada vídeo e condição da RQ6 (as trocas do pipeline não entram: não são execuções da matriz).</p>
+      <pre>uv run python src/context_audit.py consolidate</pre></div>
   </section>
 
   <!-- ================= Gabarito ================= -->
@@ -369,7 +391,7 @@ window.addEventListener("hashchange", route);
 
 /* ---------------- trabalhos: componente genérico ---------------- */
 const watchers = {};  // container id -> EventSource
-const STEPS = [["stt", "Transcrição"], ["frames", "Slides"], ["summary", "Resumo"], ["web", "Pacote da demo"]];
+const STEPS = [["frames", "Slides"], ["ocr", "OCR"], ["stt", "Transcrição"], ["summary", "Resumo"], ["web", "Pacote da demo"]];
 const STATUS = { queued: "na fila", running: "rodando", done: "pronto", error: "erro", cancelled: "interrompido" };
 
 function jobProgress(j) {
@@ -377,11 +399,12 @@ function jobProgress(j) {
     const cur = STEPS.findIndex((s) => s[0] === j.stage);
     return `<div class="steps">${STEPS.map(([id, nome], i) => {
       if (id === "summary" && !j.params.summary) return "";
+      if (id === "ocr" && !j.params.context && !j.params.ocr) return "";
       const st = j.status === "done" || i < cur ? "done" : (i === cur && j.status === "running" ? "active" : "");
       return `<div class="step ${st}">${nome}</div>`; }).join("")}</div>`;
   }
   if (j.kind === "experiment" && j.total)
-    return `<div class="meta" style="margin:.5rem 0 .2rem">${j.done} de ${j.total} ${j.params.mode === "stt" ? "combinações (modelo × vídeo × condição)" : "resumos"}</div>
+    return `<div class="meta" style="margin:.5rem 0 .2rem">${j.done} de ${j.total} ${{ stt: "combinações (modelo × vídeo × condição)", context: "combinações (modelo × vídeo × ruído × contexto)" }[j.params.mode] || "resumos"}</div>
             <progress max="${j.total}" value="${j.done}"></progress>`;
   return j.status === "running" ? `<progress style="margin:.5rem 0"></progress>` : "";
 }
@@ -440,7 +463,7 @@ loaders.lib = async () => {
         <div class="meta">${v.size_mb} MB · ${v.license ? esc(v.license) : '<span class="err">sem licença anotada</span>'}</div>
         <div class="badges">
           <span class="b ${v.status.stt ? "on" : ""}">STT</span><span class="b ${v.status.slides ? "on" : ""}">Slides</span>
-          <span class="b" title="Etapa 3: o OCR ainda não existe">OCR ⏳</span><span class="b ${v.status.summary ? "on" : ""}">Resumo</span>
+          <span class="b ${v.status.ocr ? "on" : ""}" title="${v.status.ocr ? "texto dos slides lido pelo OCR" : "rode o pipeline com --ocr ou --context (precisa do Tesseract)"}">OCR</span><span class="b ${v.status.summary ? "on" : ""}">Resumo</span>
           <span class="b ${v.clip ? "on" : ""}">Trecho</span><span class="b ${v.gt ? "on" : ""}">Gabarito</span></div>
         <div class="actions">
           ${v.viewer ? `<a class="btn" href="${esc(v.viewer)}" target="_blank" rel="noopener">Abrir ↗</a>` : ""}
@@ -487,6 +510,7 @@ function runParams() {
   return { video: $("#f-video").value, model: $("#f-model").value, device: $("#f-device").value,
     vocab: $("#f-vocab").value || null, summary: $("#f-summary").value || null,
     llm_model: $("#f-llm").value.trim() || null, frames_mode: $("#f-frames").value,
+    context: ["L", "L+F", "G"].includes($("#f-ctx").value) ? $("#f-ctx").value : null, ocr: $("#f-ctx").value === "ocr",
     step_s: $("#f-step").value ? Number($("#f-step").value) : null, confirm_paid: $("#f-paid").checked };
 }
 function updateRunForm() {
@@ -497,12 +521,14 @@ function updateRunForm() {
   if (p.llm_model) c += ` --llm-model ${p.llm_model}`;
   if (p.frames_mode !== "slides") c += ` --frames-mode ${p.frames_mode}`;
   if (p.step_s) c += ` --step-s ${p.step_s}`;
+  if (p.context) c += ` --context ${p.context}`; else if (p.ocr) c += " --ocr";
   $("#cmd").textContent = c;
+  $("#ctxwarn").hidden = !(p.context || p.ocr);
   $("#paidrow").hidden = p.summary !== "claude";
   const prob = p.summary && cfg.llm[p.summary].problem;
   $("#llmwarn").hidden = !prob; $("#llmwarn").textContent = prob ? `${prob}. O resumo será pulado e o resto segue.` : "";
   $("#f-llm").placeholder = p.summary ? cfg.llm[p.summary].model : "padrão do backend";
-  $("#go").disabled = !p.video || (p.summary === "claude" && !p.confirm_paid);
+  $("#go").disabled = !p.video || (p.summary === "claude" && !p.confirm_paid) || ((p.context || p.ocr) && p.frames_mode !== "slides");
 }
 $$("#jobform select, #jobform input").forEach((el) => el.addEventListener("input", updateRunForm));
 function pipelineEnd(j, end) {
@@ -517,6 +543,67 @@ $("#jobform").addEventListener("submit", async (e) => {
   catch (err) { $("#runerr").textContent = err.message; }
 });
 loaders.run = refreshQueue;
+
+/* ================= Correções (F10): auditoria das trocas do context_fix ================= */
+let corData = null, corIdx = 0, corStop = null;
+const corList = () => (corData ? corData.items.filter((x) => $("#c-filter").value === "todas" || !x.auditoria) : []);
+const hl = (seg, w) => { seg = seg || ""; const i = w ? seg.indexOf(w) : -1;
+  return i < 0 ? esc(seg) : esc(seg.slice(0, i)) + "<mark>" + esc(w) + "</mark>" + esc(seg.slice(i + w.length)); };
+async function loadCor() { corData = await api("/api/ctx/corrections"); corIdx = 0; renderCor(); }
+function renderCor() {
+  const d = corData, its = corList(), card = $("#c-card");
+  const julg = d.counts.certa + d.counts.errada;
+  $("#c-empty").hidden = d.total > 0;
+  $("#c-stat").textContent = d.total ? `${d.total} correções · ${d.counts.certa} certas · ${d.counts.errada} erradas · ${d.counts.duvida} não sei · precisão ${d.precision == null ? "—" : pct(d.precision)} (n=${julg})` : "";
+  card.hidden = !its.length;
+  if (!its.length) { card.innerHTML = ""; return; }
+  corIdx = Math.max(0, Math.min(corIdx, its.length - 1));
+  const x = its[corIdx];
+  card.innerHTML = `<div class="actions"><h2 style="margin:0">${esc(x.video)} · ${esc(x.modelo)} · ${esc(condLabel(x.condicao))}</h2>
+      <span class="meta">correção ${corIdx + 1} de ${its.length} (${esc(x.regra)} · p=${num(x.p, 2)} · semelhança ${num(x.sim, 2)} · slide ${esc(x.slide || "—")} · aos ${fmtT(x.t)})</span></div>
+    ${x.desatualizada ? `<p class="warn">Havia uma marcação nesta posição, mas a troca mudou (a RQ6 foi refeita). Marque de novo.</p>` : ""}
+    <div class="cols" style="margin-top:.6rem">
+      <div class="panel"><div class="meta">Antes (o que o modelo escreveu)</div><p style="font-size:1.05rem">${hl(x.seg_antes || x.antes, x.antes)}</p></div>
+      <div class="panel"><div class="meta">Depois (o termo do slide)</div><p style="font-size:1.05rem">${hl(x.seg_depois || x.depois, x.depois)}</p></div></div>
+    ${x.audio ? `<audio id="c-audio" controls preload="metadata" src="${esc(x.audio)}" style="width:100%;margin-top:.6rem"></audio>` : `<p class="warn">Áudio não encontrado: gere o trecho na tela Gabarito ou rode os experimentos.</p>`}
+    <div class="actions" style="margin-top:.6rem">
+      <button class="btn" id="c-play" title="Tecla R">▶ Ouvir o trecho (R)</button>
+      ${Object.entries(d.labels).map(([k, nome], i) => `<button class="btn ${x.auditoria === k ? "primary" : ""}" data-aud="${k}" title="Tecla ${i + 1}">${i + 1} · ${esc(nome)}</button>`).join("")}
+      <button class="btn" data-aud="">Limpar</button>
+      <button class="btn" id="c-prev">← Anterior</button><button class="btn" id="c-next">Próxima →</button></div>
+    <label style="margin-top:.5rem">Nota (opcional) <input type="text" id="c-note" maxlength="300" value="${esc(x.nota || "")}"></label>`;
+  const au = $("#c-audio");
+  $("#c-play").onclick = () => { if (!au) return; clearTimeout(corStop); au.currentTime = Math.max(0, x.t - 3); au.play(); corStop = setTimeout(() => au.pause(), 7000); };
+  $$("[data-aud]", card).forEach((b) => (b.onclick = () => corMark(x, b.dataset.aud || null)));
+  $("#c-prev").onclick = () => { corIdx = Math.max(0, corIdx - 1); renderCor(); };
+  $("#c-next").onclick = () => { corIdx = Math.min(its.length - 1, corIdx + 1); renderCor(); };
+}
+async function corMark(x, aud) {
+  const nota = $("#c-note")?.value || "";
+  try {
+    await api(`/api/ctx/corrections/${encodeURIComponent(x.video)}/${encodeURIComponent(x.modelo)}/${encodeURIComponent(x.condicao)}/${x.idx}`,
+      { method: "PUT", json: { auditoria: aud, nota } });
+  } catch (e) { alertBox($("#c-card"), e.message); return; }
+  x.auditoria = aud; x.nota = nota; x.desatualizada = false;
+  const c = { certa: 0, errada: 0, duvida: 0 };
+  corData.items.forEach((i) => { if (i.auditoria) c[i.auditoria]++; });
+  corData.counts = c; const j = c.certa + c.errada; corData.precision = j ? c.certa / j : null;
+  if ($("#c-filter").value === "todas") corIdx++;  // com "só as sem marcação", a marcada sai da lista e a próxima ocupa o lugar
+  renderCor();
+}
+$("#c-filter").addEventListener("change", () => { corIdx = 0; if (corData) renderCor(); });
+document.addEventListener("keydown", (e) => {
+  if ($("#cor").hidden || !corData || e.target.matches("input, textarea, select") || e.ctrlKey || e.metaKey || e.altKey) return;
+  const its = corList(), x = its[corIdx];
+  if (!x) return;
+  if (["1", "2", "3"].includes(e.key)) corMark(x, Object.keys(corData.labels)[Number(e.key) - 1]);
+  else if (e.key === "ArrowRight") { corIdx = Math.min(its.length - 1, corIdx + 1); renderCor(); }
+  else if (e.key === "ArrowLeft") { corIdx = Math.max(0, corIdx - 1); renderCor(); }
+  else if (e.key === "r" || e.key === "R") $("#c-play")?.click();
+  else return;
+  e.preventDefault();
+});
+loaders.cor = loadCor;
 async function fillVideoSelect() {
   const vids = await api("/api/videos"); const cur = $("#f-video").value;
   $("#f-video").innerHTML = vids.map((v) => `<option>${esc(v.file)}</option>`).join("");
@@ -529,14 +616,15 @@ const xMode = () => $("input[name=mode]:checked").value;
 function expParams() {
   const mode = xMode();
   return { mode, models: $$("#x-models input:checked").map((i) => i.value), conditions: $$("#x-conds input:checked").map((i) => i.value),
+    contexts: $$("#x-ctxs input:checked").map((i) => i.value),
     reps: Number($("#x-reps").value) || null, device: $("#x-device").value, vocab: $("#x-vocab").checked, no_clean: $("#x-noclean").checked,
     redo: $("#x-redo").checked, backend: $("#x-backend").value, llm_model: $("#x-llm").value.trim() || null, confirm_paid: $("#x-paid").checked };
 }
 let planTimer = null, lastMode = "stt";
 function expChanged() {
   const mode = xMode();
-  if (mode !== lastMode) { $("#x-reps").value = mode === "stt" ? 3 : 2; lastMode = mode; }
-  $$("#expform [data-mode]").forEach((el) => (el.hidden = el.dataset.mode !== mode));
+  if (mode !== lastMode) { $("#x-reps").value = mode === "summaries" ? 2 : 3; lastMode = mode; }
+  $$("#expform [data-mode]").forEach((el) => (el.hidden = !el.dataset.mode.split(" ").includes(mode)));
   $("#x-paidrow").hidden = mode !== "summaries" || $("#x-backend").value !== "claude";
   clearTimeout(planTimer); planTimer = setTimeout(loadPlan, 250);
 }
@@ -544,15 +632,16 @@ async function loadPlan() {
   const p = expParams(), box = $("#plan");
   let pl;
   try { pl = await api("/api/experiments/plan", { json: p }); } catch (e) { box.innerHTML = `<p class="err">${esc(e.message)}</p>`; return; }
-  const unidade = pl.mode === "stt" ? "combinações" : "resumos";
+  const resumo = pl.mode === "summaries", unidade = resumo ? "resumos" : "combinações";
   box.innerHTML = `<h2>Plano</h2>
     <div class="stat"><div>pendentes<strong>${pl.pending} de ${pl.total}</strong></div>
-      <div>${pl.mode === "stt" ? "transcrições (com aquecimento)" : "chamadas ao LLM"}<strong>${pl.transcriptions}</strong></div>
+      <div>${resumo ? "chamadas ao LLM" : "transcrições (com aquecimento)"}<strong>${pl.transcriptions}</strong></div>
       <div>vídeos<strong>${pl.videos.length}</strong></div><div>repetições<strong>${pl.reps}</strong></div></div>
     <div class="tablewrap"><table><tr><th>Modelo</th><th>${unidade} pendentes</th></tr>
       ${Object.entries(pl.per_model).map(([m, n]) => `<tr><td>${esc(m)}</td><td>${n}</td></tr>`).join("")}</table></div>
     <p class="meta">Vídeos: ${pl.videos.map(esc).join(", ") || "nenhum"}${pl.without_gt.length ? ` · sem gabarito (pulados): ${pl.without_gt.map(esc).join(", ")}` : ""}
-      ${pl.mode === "stt" ? ` · condições: ${pl.conditions.map(esc).join(", ")}` : ` · LLM: ${esc(pl.conditions[0])}`}</p>
+      ${resumo ? ` · LLM: ${esc(pl.conditions[0])}` : ` · condições: ${pl.conditions.map(esc).join(", ")}`}
+      ${pl.without_glossary && pl.without_glossary.length ? ` · sem glossário (pulados): ${pl.without_glossary.map(esc).join(", ")}` : ""}</p>
     ${pl.problems.map((m) => `<p class="warn">${esc(m)}</p>`).join("")}
     <p class="note">Use o mesmo dispositivo e o mesmo hardware em todos os experimentos (CLAUDE.md, regra 6). Interromper é seguro: ao rodar de novo, o que já está no raw.csv é pulado.</p>
     <pre>${esc(pl.cmd)}</pre>
@@ -577,6 +666,9 @@ function modelColor(m) {  // cor fixa por entidade (modelo base), nunca pela pos
   return css(SERIES_VARS[(i < 0 ? cfg.models.length : i) % SERIES_VARS.length]);
 }
 const COND_LABEL = { limpo: "limpo", snr20: "20 dB", snr10: "10 dB", snr0: "0 dB", limpo_vocab: "limpo + vocab." };
+const CTX_LABEL = { B0: "B0 sem contexto", G: "G global", P: "P placebo", L: "L local", "L+F": "L+F local + correção", O: "O oráculo" };
+/* "snr10@L+F" -> "10 dB · L+F": o ruído e, depois do @, o modo de contexto (F10) */
+function condLabel(c) { const [r, m] = String(c).split("@"); const base = COND_LABEL[r] || r; return m ? `${base} · ${m}` : base; }
 function sortModels(ms) {
   const key = (m) => { const i = cfg.models.indexOf(m.replace(/-semfiltro$/, "")); return (i < 0 ? 99 : i) * 2 + (m.endsWith("-semfiltro") ? 1 : 0); };
   return [...ms].sort((a, b) => key(a) - key(b) || a.localeCompare(b));
@@ -725,6 +817,23 @@ function renderResults() {
       const [m, c] = k.split("\u0000");
       return `<tr><td>${esc(m)} / ${esc(c)}</td>${mets.map((x) => `<td>${fm(d.summary.find((r) => r.modelo === m && r.condicao === c && r.metrica === x))}</td>`).join("")}</tr>`; }).join("") + `</table>`;
   }
+  // tabela 5: o slide como contexto (F10)
+  $("#t5wrap").hidden = !(d.ctx && d.ctx.length);
+  if (d.ctx && d.ctx.length) {
+    const cm = [["wer", "WER", (v) => pct(v)], ["acerto_termos_slide", "termos do slide", (v) => pct(v)], ["acerto_termos_fora", "termos fora do slide", (v) => pct(v)],
+      ["falsos_positivos", "falsos positivos", (v) => num(v, 1)], ["taxa_alteracao", "palavras alteradas", (v) => pct(v)], ["precisao_correcoes", "precisão das correções", (v) => pct(v)]]
+      .filter(([k]) => d.ctx.some((r) => r.metrica === k));
+    const rk = (c) => { const [r, m] = c.split("@"); return d.conditions_order.indexOf(r) * 100 + d.contexts_order.indexOf(m); };
+    const mods = sortModels([...new Set(d.ctx.map((r) => r.modelo))]);
+    const keys = [...new Set(d.ctx.map((r) => r.modelo + "\u0000" + r.condicao))].sort((a, b) => {
+      const [ma, ca] = a.split("\u0000"), [mb, cb] = b.split("\u0000");
+      return (mods.indexOf(ma) - mods.indexOf(mb)) || (rk(ca) - rk(cb)); });
+    $("#t5").innerHTML = `<table><tr><th>Modelo</th><th>Condição</th>${cm.map(([, nome]) => `<th>${esc(nome)}</th>`).join("")}<th>RTF</th></tr>` + keys.map((k) => {
+      const [m, c] = k.split("\u0000");
+      const g = (met) => d.ctx.find((r) => r.modelo === m && r.condicao === c && r.metrica === met);
+      const rtf = g("wer")?.rtf;
+      return `<tr><td>${esc(m)}</td><td>${esc(condLabel(c))}</td>${cm.map(([met, , f]) => `<td>${ms(g(met), f)}</td>`).join("")}<td>${rtf ? ms(rtf, (v) => num(v, 3)) : "—"}</td></tr>`; }).join("") + `</table>`;
+  }
   // hardware
   const h = d.hardware;
   $("#hw").innerHTML = h ? `${esc(h.cpu)} · ${h.threads} threads · ${h.ram_gb} GB RAM · ${h.gpus_cuda} GPU CUDA<br>${esc(h.os)} · Python ${esc(h.python)}<br><span>Vai para o artigo (regra 6).</span>`
@@ -842,7 +951,7 @@ const OPS = { substitute: "S", delete: "D", insert: "I" };
 async function loadErrSources() {
   errSrc = await api("/api/errors/sources");
   const key = (s) => `${s.video}|${s.modelo}|${s.condicao}`, cur = $("#e-src").value;
-  $("#e-src").innerHTML = errSrc.map((s) => `<option value="${esc(key(s))}">${esc(s.video)} · ${esc(s.modelo)} · ${esc(COND_LABEL[s.condicao] || s.condicao)}</option>`).join("");
+  $("#e-src").innerHTML = errSrc.map((s) => `<option value="${esc(key(s))}">${esc(s.video)} · ${esc(s.modelo)} · ${esc(condLabel(s.condicao))}</option>`).join("");
   if (cur && errSrc.some((s) => key(s) === cur)) $("#e-src").value = cur;
   $("#e-empty").hidden = errSrc.length > 0; $("#e-body").hidden = !errSrc.length;
 }
@@ -943,8 +1052,8 @@ function abModels() {
 }
 function abConds() {
   const v = $("#a-video").value, m = $("#a-model").value;
-  const cs = cfg.conditions.concat("limpo_vocab").filter((c) => abSrc.some((s) => s.video === v && s.modelo === m && s.condicao === c));
-  const opts = cs.map((c) => `<option value="${c}">${esc(COND_LABEL[c] || c)}</option>`).join("");
+  const cs = [...new Set(abSrc.filter((s) => s.video === v && s.modelo === m).map((s) => s.condicao))];  // a ordem vem do servidor
+  const opts = cs.map((c) => `<option value="${esc(c)}">${esc(condLabel(c))}</option>`).join("");
   const a = $("#a-ca").value, b = $("#a-cb").value;
   $("#a-ca").innerHTML = opts; $("#a-cb").innerHTML = opts;
   $("#a-ca").value = cs.includes(a) ? a : cs.includes("limpo") ? "limpo" : cs[0];
@@ -957,7 +1066,7 @@ async function abLoad() {
     const c = $(side === "A" ? "#a-ca" : "#a-cb").value, box = $("#a-" + side);
     if (!c) { box.innerHTML = ""; continue; }
     const d = await api(`/api/ab/${encodeURIComponent(v)}/${encodeURIComponent(m)}/${encodeURIComponent(c)}`);
-    box.innerHTML = `<h2>${side}: ${esc(COND_LABEL[c] || c)}</h2>
+    box.innerHTML = `<h2>${side}: ${esc(condLabel(c))}</h2>
       <div class="stat"><div>WER (raw.csv)<strong>${d.wer ? pct(d.wer.mean) : "—"}</strong>${d.wer ? `n=${d.wer.n}` : ""}</div>
         <div>CER (raw.csv)<strong>${d.cer ? pct(d.cer.mean) : "—"}</strong>${d.cer ? `n=${d.cer.n}` : ""}</div><div>falas<strong>${d.segments.length}</strong></div></div>
       ${d.audio ? `<audio controls preload="metadata" src="${esc(d.audio)}" data-side="${side}"></audio>` : `<p class="warn">Áudio do trecho não encontrado em data/derived/.</p>`}
@@ -1010,6 +1119,7 @@ document.addEventListener("keydown", (e) => {
   $("#f-vocab").innerHTML += cfg.vocab_files.map((v) => `<option>${esc(v)}</option>`).join("");
   $("#x-models").innerHTML = cfg.models.map((m) => `<label class="check"><input type="checkbox" value="${m}" ${["tiny", "base", "small"].includes(m) ? "checked" : ""}> ${m}</label>`).join("");
   $("#x-conds").innerHTML = cfg.conditions.map((c) => `<label class="check"><input type="checkbox" value="${c}" checked> ${esc(COND_LABEL[c])}</label>`).join("");
+  $("#x-ctxs").innerHTML = cfg.contexts.map((c) => `<label class="check"><input type="checkbox" value="${esc(c)}" ${["B0", "G", "P", "L", "L+F"].includes(c) ? "checked" : ""}> ${esc(CTX_LABEL[c] || c)}</label>`).join("");
   if (!cfg.has_terms) { $("#x-vocab").disabled = true; }
   await fillVideoSelect();
   expChanged();
