@@ -137,3 +137,131 @@ def test_slides_volta_mais_completa_substitui_a_parcial():
     outro = _slide("Balanco", ["Ativo = Passivo + PL"])
     res = _alimenta(extract.SlideTracker(), [(4, parcial), (4, outro), (4, completo)])
     assert len(res) == 2 and np.array_equal(res[0]["image"], completo) and len(res[0]["visits"]) == 2
+
+
+# --- layout em painel (F10, Fase 1): moldura texturizada + painel preto + fita no topo ---------------
+
+def _moldura(linhas, titulo="Titulo da fita", painel=(0.10, 0.12, 0.90, 0.86), seed=3):
+    """Quadro 960×540 no layout do curso de teste: moldura amarela texturizada, painel preto (~51% do
+    quadro) e fita cinza texturizada sobre a borda de cima do painel. A textura é a mesma em todos os
+    quadros (seed fixa), como no vídeo real."""
+    import cv2
+
+    rng = np.random.default_rng(seed)
+    h, w = 540, 960
+    img = np.clip(np.array([30, 170, 190], np.int16) + rng.integers(-40, 40, (h, w, 1), dtype=np.int16),
+                  0, 255).astype(np.uint8)
+    x0, y0, x1, y1 = int(painel[0] * w), int(painel[1] * h), int(painel[2] * w), int(painel[3] * h)
+    img[y0:y1, x0:x1] = 0
+    fx0, fy0, fx1, fy1 = int(0.17 * w), int(0.03 * h), int(0.85 * w), int(0.22 * h)
+    img[fy0:fy1, fx0:fx1] = np.clip(120 + rng.integers(-30, 30, (fy1 - fy0, fx1 - fx0, 1)), 0, 255)
+    cv2.putText(img, titulo, (fx0 + 40, 100), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
+    for i, linha in enumerate(linhas):
+        cv2.putText(img, f"- {linha}", (int(0.14 * w), int(0.32 * h) + 62 * i), cv2.FONT_HERSHEY_SIMPLEX, 0.8,
+                    (255, 255, 255), 2)
+    return img
+
+
+_BULLETS_A = ["Orgao maximo do SFN que formula politicas", "Composicao: Fazenda, BACEN, Planejamento",
+              "Equilibrar os meios de pagamento", "Regular o valor interno e externo da moeda"]
+
+
+def _mediana_analise(img):
+    import cv2
+
+    pequeno = cv2.resize(img, extract.ANALYSIS_SIZE, interpolation=cv2.INTER_AREA)
+    return int(np.median(cv2.cvtColor(pequeno, cv2.COLOR_BGR2GRAY)))
+
+
+def test_slides_painel_perto_de_50_por_cento_nao_perde_o_slide():
+    """Regressão de S2 (docs/plano_contexto_cruzado.md): o fundo liso era medido no quadro inteiro, e a
+    mediana do quadro cai da cor do painel para a da moldura quando o texto novo tira o painel de 50%."""
+    roi = (0.14, 0.26, 0.86, 0.82)
+    estagios = [_moldura(_BULLETS_A[:k]) for k in (1, 2, 3, 4)]
+    assert _mediana_analise(estagios[0]) == 0 and _mediana_analise(estagios[3]) > 0  # a precondição do defeito
+    b = _moldura(["Banco Central do Brasil", "Executa as politicas do CMN"], titulo="Outro slide")
+    res = _alimenta(extract.SlideTracker(roi=roi), [(3, estagios[0]), (3, estagios[1]), (3, estagios[2]),
+                                                    (3, estagios[3]), (4, b)])
+    assert len(res) == 2
+    assert res[0]["n_stages"] == 4 and np.array_equal(res[0]["image"], estagios[3])  # o quadro completo
+    assert np.array_equal(res[1]["image"], b)
+
+
+def test_slides_com_painel_ainda_rejeita_camera_em_tela_cheia():
+    rng = np.random.default_rng(1)
+    camera = cv2_blur(rng.integers(0, 255, (540, 960, 3), dtype=np.uint8))
+    a = _moldura(_BULLETS_A[:2])
+    res = _alimenta(extract.SlideTracker(roi=(0.14, 0.26, 0.86, 0.82)), [(4, a), (4, camera), (4, a)])
+    assert len(res) == 1 and len(res[0]["visits"]) == 2
+
+
+def _iou(a, b):
+    iw = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+    ih = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    inter = iw * ih
+    return inter / ((a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter)
+
+
+def _camera():
+    rng = np.random.default_rng(1)
+    return cv2_blur(rng.integers(0, 255, (540, 960, 3), dtype=np.uint8))
+
+
+def test_panel_detecta_o_painel_da_moldura():
+    frames = [_moldura(_BULLETS_A[:k]) for k in (1, 2, 3, 4)] + [_moldura(["Outro"], titulo="B")]
+    frames += [_camera(), _camera()]  # a câmera em tela cheia não pode atrapalhar
+    det = extract.panel_from_frames(frames)
+    assert det is not None and det["votes"] >= 4
+    # painel preto: x 0,10–0,90 e y 0,12–0,86. A fita (y 0,03–0,22) cobre a borda de cima, então o
+    # retângulo liso (o do rastreio) começa abaixo dela, e a caixa do OCR (a região inteira) inclui a fita
+    assert _iou(det["roi"], (0.10, 0.22, 0.90, 0.86)) > 0.85
+    assert det["ocr_box"][1] < det["roi"][1] - 0.04
+
+
+def test_panel_nao_inventa_painel_em_slide_de_tela_cheia():
+    cheios = [_slide("Transacoes", [f"item {k}"]) for k in range(5)]
+    assert extract.panel_from_frames(cheios) is None
+
+
+def test_panel_nao_confunde_faixa_de_titulo_com_moldura():
+    def com_faixa(titulo):
+        import cv2
+
+        img = np.full((540, 960, 3), 255, np.uint8)
+        img[:90] = (160, 60, 20)  # faixa de título azul, de ponta a ponta
+        cv2.putText(img, titulo, (40, 60), cv2.FONT_HERSHEY_SIMPLEX, 1.4, (255, 255, 255), 3)
+        cv2.putText(img, "- um bullet qualquer", (60, 200), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (60, 60, 60), 2)
+        return img
+
+    assert extract.panel_from_frames([com_faixa(f"Slide {k}") for k in range(5)]) is None
+
+
+def test_panel_so_camera_nao_tem_painel():
+    assert extract.panel_from_frames([_camera()] * 6) is None
+
+
+def _video_moldura(tmp_path):
+    import cv2
+
+    p = tmp_path / "moldura.mp4"
+    w = cv2.VideoWriter(str(p), cv2.VideoWriter_fourcc(*"mp4v"), 5, (960, 540))
+    b = _moldura(["Banco Central do Brasil", "Executa as politicas do CMN"], titulo="Outro slide")
+    for img, dur in [(_moldura(_BULLETS_A[:k]), 3) for k in (1, 2, 3, 4)] + [(b, 4)]:
+        for _ in range(dur * 5):
+            w.write(img)
+    w.release()
+    return p
+
+
+def test_slides_acha_o_painel_sozinho_e_grava_panel_json(tmp_path):
+    v = _video_moldura(tmp_path)
+    det = extract.find_panel(v)
+    assert det is not None and _iou(det["roi"], (0.10, 0.22, 0.90, 0.86)) > 0.8
+    out = tmp_path / "auto"
+    res = extract.slides(v, out, step_s=0.5)  # padrão: panel="auto"
+    assert len(res) == 2 and res[0]["n_stages"] >= 3
+    guardado = json.loads((out / "panel.json").read_text())
+    assert guardado["modo"] == "auto" and _iou(guardado["roi"], det["roi"]) > 0.99
+    # sem o painel, a moldura inteira conta como tinta (> max_ink) e nenhum slide é aceito (S1 e S2)
+    assert extract.slides(v, tmp_path / "off", step_s=0.5, panel="off") == []
+    assert json.loads((tmp_path / "off" / "panel.json").read_text())["modo"] == "off"

@@ -125,7 +125,8 @@ class SlideTracker:
 
     def __init__(self, out_dir: str | Path | None = None, keep_thr: float = 0.9, grow_eps: float = 0.01,
                  static_eps: float = 0.02, min_stable: int = 2, min_ink: float = 0.002,
-                 min_slide_s: float = 2.0, max_ink: float = 0.30, min_flat: float = 0.35, title_frac: float = 0.22, roi=(0, 0, 1, 1), ignore=()):
+                 min_slide_s: float = 2.0, max_ink: float = 0.30, min_flat: float = 0.35, title_frac: float = 0.22, roi=(0, 0, 1, 1), ignore=(),
+                 trace=None):
         import cv2
 
         self._cv2 = cv2
@@ -138,6 +139,13 @@ class SlideTracker:
         w, h = ANALYSIS_SIZE
         self._shape = (h, w)
         self._fixed_valid = _rect_mask([roi], self._shape) & ~_rect_mask(ignore, self._shape)
+        # Referência do fundo (mediana de cinza) e do "fundo liso": só a região analisada. Com o quadro
+        # inteiro, um painel que ocupa ~50% do quadro (moldura texturizada em volta) fazia a mediana saltar
+        # de cor quando o texto novo tirava o painel de 50%, e o filtro min_flat derrubava o slide
+        # (docs/decisoes.md, D14). Sem roi nem ignore, a região é o quadro inteiro: resultado idêntico ao antigo.
+        self._ref = self._fixed_valid if self._fixed_valid.any() else np.ones(self._shape, dtype=bool)
+        self._ref_all = bool(self._ref.all())
+        self._trace = trace  # opcional: função(dict) chamada a cada amostra estável (diagnóstico)
         self._title = np.zeros(self._shape, dtype=bool)
         y0, y1 = int(roi[1] * h), int(np.ceil(roi[3] * h))
         self._title[y0:y0 + max(1, int(title_frac * (y1 - y0)))] = True
@@ -156,7 +164,8 @@ class SlideTracker:
         cv2 = self._cv2
         g = cv2.cvtColor(cv2.resize(frame, ANALYSIS_SIZE, interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2GRAY)
         g = g.astype(np.int16)
-        ink = np.abs(g - int(np.median(g))) > INK_DELTA * 255
+        ref = g if self._ref_all else g[self._ref]
+        ink = np.abs(g - int(np.median(ref))) > INK_DELTA * 255
         return ink, cv2.dilate(ink.astype(np.uint8), self._kernel).astype(bool), g
 
     def _valid(self) -> np.ndarray:
@@ -211,9 +220,17 @@ class SlideTracker:
 
     def _consider(self, t: float, frame, ink, dil, g) -> None:
         valid = self._valid()
-        flat = float((np.abs(g - int(np.median(g))) <= 3).mean())  # fração de fundo liso (slide alto, foto baixo)
+        ref = g if self._ref_all else g[self._ref]
+        flat = float((np.abs(ref - int(np.median(ref))) <= 3).mean())  # fração de fundo liso (slide alto, foto baixo)
         frac = int((ink & valid).sum()) / max(int(valid.sum()), 1)
-        if frac < self.min_ink or frac > self.max_ink or flat < self.min_flat:  # sem conteúdo, ou imagem natural (professor em tela cheia)
+        # sem conteúdo, ou imagem natural (professor em tela cheia)
+        rejeitado = frac < self.min_ink or frac > self.max_ink or flat < self.min_flat
+        if self._trace:
+            ep = self._ep
+            self._trace({"t": t, "tinta": frac, "liso": flat, "rejeitado": rejeitado,
+                         "mantido": None if ep is None else self._kept(ep["ink"], dil, valid),
+                         "inicio": None if ep is None else ep["t_start"]})
+        if rejeitado:
             self._commit(t)
             return
         ep = self._ep
@@ -274,18 +291,174 @@ class SlideTracker:
         return [{k: v for k, v in s.items() if k not in ("ink", "dil")} for s in self.slides]
 
 
-def slides(video: str | Path, out_dir: str | Path, step_s: float = 0.5, **kwargs) -> list[dict]:
+# --------------------------------------------------------------------------------------------------
+# Painel do slide (F10, Fase 1): a região do quadro onde o slide aparece, sem moldura, miniatura nem rodapé
+# --------------------------------------------------------------------------------------------------
+
+PANEL_BLOCK = 6         # lado do bloco de análise (px em ANALYSIS_SIZE)
+PANEL_FLAT_RANGE = 10   # amplitude de cinza (máx − mín) abaixo da qual um bloco é "liso"
+PANEL_GRAY_BIN = 32     # largura da faixa de cinza: blocos lisos de tons diferentes são regiões diferentes
+PANEL_MAX_STD = 8.0     # desvio máximo (níveis de cinza) do tom da região: a parede do estúdio tem gradiente
+PANEL_COVER = 0.60      # uma linha/coluna só é do painel se a região a cobrir em ≥ 60% (fita e miniatura ficam de fora)
+PANEL_MIN_AREA = 0.12   # fração mínima do quadro para o retângulo liso valer como painel
+PANEL_MIN_INSET = 0.04  # o painel tem de ficar afastado ≥ 4% de pelo menos 3 das 4 bordas do quadro
+PANEL_MAX_AREA = 0.85   # acima disso é slide em tela cheia: não há painel a recortar
+PANEL_AGREE_IOU = 0.85  # dois quadros "votam" no mesmo painel se os retângulos tiverem IoU ≥ isto
+
+
+def _fill_holes(mask: np.ndarray) -> np.ndarray:
+    """Preenche os buracos fechados de uma máscara (uint8 0/1): texto e diagramas dentro do painel. O que
+    toca a borda não é buraco: a fita de título e a miniatura da câmera, que avançam sobre o painel a
+    partir de fora, continuam de fora."""
+    import cv2
+
+    h, w = mask.shape
+    pad = np.zeros((h + 2, w + 2), np.uint8)
+    pad[1:-1, 1:-1] = mask
+    fora = pad.copy()
+    cv2.floodFill(fora, np.zeros((h + 4, w + 4), np.uint8), (0, 0), 2)
+    return (fora[1:-1, 1:-1] != 2).astype(np.uint8)
+
+
+def _panel_candidate(gray: np.ndarray):
+    """Num quadro em cinza (ANALYSIS_SIZE): a maior região lisa e de um só tom (faixa de cinza), com os
+    buracos fechados preenchidos. Devolve (roi, caixa, (linhas, colunas)) em blocos, ou None:
+      caixa  caixa da região inteira (inclui a fita de título que cobre a borda do painel);
+      roi    a caixa aparada às linhas e colunas que a região cobre em ≥ 60%: sem a fita no topo, sem a
+             miniatura da câmera nos cantos. Texto denso não encolhe o roi (os buracos são preenchidos).
+    O painel de um slide é liso (fundo uniforme com texto esparso). A moldura, a fita de título e a
+    miniatura da câmera têm textura, e as facetas lisas da moldura têm outro tom: ficam de fora."""
+    import cv2
+
+    b = PANEL_BLOCK
+    gh, gw = gray.shape[0] // b, gray.shape[1] // b
+    blocos = gray[:gh * b, :gw * b].reshape(gh, b, gw, b)
+    liso = (blocos.max(axis=(1, 3)).astype(np.int16) - blocos.min(axis=(1, 3))) <= PANEL_FLAT_RANGE
+    faixa = (blocos.mean(axis=(1, 3)) // PANEL_GRAY_BIN).astype(int)
+    kernel = np.ones((5, 5), np.uint8)
+    melhor, area_melhor = None, 0
+    for v in np.unique(faixa[liso]):
+        m = cv2.morphologyEx((liso & (faixa == v)).astype(np.uint8), cv2.MORPH_CLOSE, kernel)
+        n, rotulos, stats, _ = cv2.connectedComponentsWithStats(m, connectivity=4)
+        for i in range(1, n):
+            if stats[i, cv2.CC_STAT_AREA] < PANEL_MIN_AREA * gh * gw:
+                continue
+            reg = _fill_holes((rotulos == i).astype(np.uint8)).astype(bool)
+            ys, xs = np.nonzero(reg)
+            x0, x1, y0, y1 = int(xs.min()), int(xs.max()) + 1, int(ys.min()), int(ys.max()) + 1
+            caixa = reg[y0:y1, x0:x1]
+            linhas = np.flatnonzero(caixa.mean(axis=1) >= PANEL_COVER)
+            if not len(linhas):
+                continue
+            top, bot = y0 + int(linhas[0]), y0 + int(linhas[-1]) + 1
+            colunas = np.flatnonzero(reg[top:bot, x0:x1].mean(axis=0) >= PANEL_COVER)
+            if not len(colunas):
+                continue
+            esq, dir_ = x0 + int(colunas[0]), x0 + int(colunas[-1]) + 1
+            area = (dir_ - esq) * (bot - top)
+            fracao = (esq / gw, top / gh, dir_ / gw, bot / gh)
+            folgas = (fracao[0], fracao[1], 1 - fracao[2], 1 - fracao[3])
+            # painel de verdade: não é o quadro todo, fica afastado de ≥ 3 das 4 bordas (moldura em volta) e
+            # tem um tom só. Slide em tela cheia, faixa de título de ponta a ponta e parede de estúdio saem
+            if (area > PANEL_MAX_AREA * gh * gw or sum(f >= PANEL_MIN_INSET for f in folgas) < 3
+                    or float(blocos.mean(axis=(1, 3))[reg & liso].std()) > PANEL_MAX_STD):
+                continue
+            if area > area_melhor:
+                melhor, area_melhor = ((esq, top, dir_, bot), (x0, y0, x1, y1), (gh, gw)), area
+    return melhor if area_melhor >= PANEL_MIN_AREA * gh * gw else None
+
+
+def _iou(a, b) -> float:
+    iw, ih = min(a[2], b[2]) - max(a[0], b[0]), min(a[3], b[3]) - max(a[1], b[1])
+    if iw <= 0 or ih <= 0:
+        return 0.0
+    inter = iw * ih
+    return inter / ((a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter)
+
+
+def panel_from_frames(frames, min_votes: int | None = None) -> dict | None:
+    """Painel do slide a partir de quadros BGR amostrados ao longo do vídeo, ou None (usar o quadro inteiro).
+
+    Cada quadro propõe um painel (`_panel_candidate`); vale o painel em que mais quadros concordam (IoU ≥
+    PANEL_AGREE_IOU), com pelo menos `min_votes` votos (padrão: 4% dos quadros, mínimo 3). Cada quadro só
+    propõe painel se ele ficar afastado de ≥ 3 das 4 bordas, ocupar menos de PANEL_MAX_AREA do quadro e
+    tiver um tom só (`_panel_candidate`): slide em tela cheia, ou com faixa de título de ponta a ponta, não
+    tem moldura e fica sem painel (comportamento antigo).
+
+    Devolve {"roi", "ocr_box", "votes", "frames"}, retângulos (x0, y0, x1, y1) em frações do quadro:
+      roi     retângulo liso, para o rastreio (`SlideTracker(roi=...)`);
+      ocr_box caixa da região inteira, que inclui a fita de título que cobre a borda do painel."""
+    import cv2
+
+    cands = []
+    for f in frames:
+        g = cv2.cvtColor(cv2.resize(f, ANALYSIS_SIZE, interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2GRAY)
+        c = _panel_candidate(g)
+        if c:
+            cands.append(c)
+    votos_min = min_votes if min_votes is not None else max(3, round(0.04 * len(frames)))
+    if len(cands) < votos_min:
+        return None
+    grupos = [[j for j, o in enumerate(cands) if _iou(c[0], o[0]) >= PANEL_AGREE_IOU] for c in cands]
+    melhor = max(grupos, key=len)
+    if len(melhor) < votos_min:
+        return None
+    gh, gw = cands[melhor[0]][2]
+    rect = np.median([cands[j][0] for j in melhor], axis=0)
+    caixa = np.median([cands[j][1] for j in melhor], axis=0)
+    roi = (rect[0] / gw, rect[1] / gh, rect[2] / gw, rect[3] / gh)
+    ocr = (caixa[0] / gw, caixa[1] / gh, caixa[2] / gw, caixa[3] / gh)
+    return {"roi": tuple(round(float(v), 4) for v in roi), "ocr_box": tuple(round(float(v), 4) for v in ocr),
+            "votes": len(melhor), "frames": len(frames)}
+
+
+def find_panel(video: str | Path, n_samples: int = 60) -> dict | None:
+    """Amostra `n_samples` quadros espaçados do vídeo (com seek: poucas amostras) e devolve
+    `panel_from_frames`. None se o vídeo não tiver painel (ou não permitir seek)."""
+    import cv2
+
+    cap = cv2.VideoCapture(str(video))
+    if not cap.isOpened():
+        raise RuntimeError(f"OpenCV não abriu {video}")
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    quadros = []
+    if total > 0:
+        for i in np.linspace(0.02 * total, 0.98 * total, n_samples).astype(int):
+            cap.set(cv2.CAP_PROP_POS_FRAMES, int(i))
+            ok, q = cap.read()
+            if ok:
+                quadros.append(q)
+    cap.release()
+    return panel_from_frames(quadros) if quadros else None
+
+
+def slides(video: str | Path, out_dir: str | Path, step_s: float = 0.5, panel: str = "auto", **kwargs) -> list[dict]:
     """Um quadro por slide, o mais completo (o último antes da troca), mesmo que o professor
     revele os bullets aos poucos. Leitura sequencial, amostrando a cada step_s segundos.
 
-    Grava NNNN.png (quadro original) e frames.json e devolve a lista, com, por slide:
+    Grava NNNN.png (quadro original), frames.json e panel.json e devolve a lista, com, por slide:
     t (início do slide, para o clique da página), t_complete (quando ficou completo), t_end,
     n_stages (estados estáveis: 1 + bullets revelados), file e visits ([[início, fim], ...],
     mais de um se o professor voltou ao slide). kwargs vão para SlideTracker
-    (keep_thr, grow_eps, min_stable, min_slide_s, roi, ignore...)."""
+    (keep_thr, grow_eps, min_stable, min_slide_s, roi, ignore...).
+
+    panel: "auto" (padrão) procura o painel do slide (`find_panel`) quando `roi` não é dado; sem painel
+    (slide em tela cheia), analisa o quadro inteiro, como antes. "off" nunca procura. panel.json guarda
+    o resultado: {"modo": "auto" | "manual" | "off", "roi", "ocr_box"}."""
     import cv2
 
     out_dir = Path(out_dir)
+    achado = None
+    if "roi" in kwargs:
+        info = {"modo": "manual", "roi": list(kwargs["roi"]), "ocr_box": list(kwargs["roi"])}
+    elif panel == "auto":
+        achado = find_panel(video)
+        if achado:
+            kwargs["roi"] = achado["roi"]
+        info = {"modo": "auto", "roi": list(achado["roi"]) if achado else None,
+                "ocr_box": list(achado["ocr_box"]) if achado else None}
+    else:
+        info = {"modo": "off", "roi": None, "ocr_box": None}
     cap = cv2.VideoCapture(str(video))
     if not cap.isOpened():
         raise RuntimeError(f"OpenCV não abriu {video}")
@@ -302,6 +475,7 @@ def slides(video: str | Path, out_dir: str | Path, step_s: float = 0.5, **kwargs
     cap.release()
     resultado = tracker.finish(n / fps)
     (out_dir / "frames.json").write_text(json.dumps(resultado, ensure_ascii=False, indent=2), encoding="utf-8")
+    (out_dir / "panel.json").write_text(json.dumps(info, ensure_ascii=False, indent=2), encoding="utf-8")
     return resultado
 
 
@@ -324,11 +498,30 @@ def main() -> None:
     ap.add_argument("--roi", type=_rect, help="região analisada: x0,y0,x1,y1 em frações do quadro")
     ap.add_argument("--ignore", type=_rect, action="append", default=[],
                     help="região a ignorar (professor, player): x0,y0,x1,y1; pode repetir")
+    ap.add_argument("--panel", choices=["auto", "off"], default="auto",
+                    help="auto: procura o painel do slide (moldura, miniatura e rodapé ficam de fora); "
+                         "off: analisa o quadro inteiro. --roi tem prioridade sobre os dois")
+    ap.add_argument("--trace", help="t0,t1 (s): imprime a decisão do rastreio a cada amostra estável nesse intervalo "
+                                    "(diagnóstico: tinta, fundo liso, motivo da rejeição)")
     a = ap.parse_args()
     video = Path(a.video)
     out = Path(a.out) if a.out else Path(__file__).resolve().parent.parent / "data" / "derived" / video.stem / "frames"
     extra = {"roi": a.roi} if a.roi else {}
-    res = slides(video, out, a.step_s, keep_thr=a.keep_thr, min_slide_s=a.min_slide_s, ignore=a.ignore, **extra)
+    if a.trace:
+        t0, t1 = (float(x) for x in a.trace.split(","))
+
+        def trace(d):
+            if t0 <= d["t"] <= t1:
+                mantido = "-" if d["mantido"] is None else f"{d['mantido']:.3f}"
+                print(f"  t={d['t']:7.1f} tinta={d['tinta']:6.1%} liso={d['liso']:6.1%} mantido={mantido}"
+                      f"{'  REJEITADO' if d['rejeitado'] else ''}")
+
+        extra["trace"] = trace
+    res = slides(video, out, a.step_s, panel=a.panel, keep_thr=a.keep_thr, min_slide_s=a.min_slide_s,
+                 ignore=a.ignore, **extra)
+    info = json.loads((out / "panel.json").read_text(encoding="utf-8"))
+    print(f"painel: {info['modo']}" + (f"  roi {tuple(info['roi'])}  ocr {tuple(info['ocr_box'])}" if info["roi"] else
+                                       "  (quadro inteiro)"))
     print(f"{len(res)} slides em {out}")
     for i, s in enumerate(res):
         print(f"{s['file']}  início {s['t']:7.1f} s  completo {s['t_complete']:7.1f} s  fim {s['t_end']:7.1f} s  "
